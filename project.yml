@@ -1,0 +1,39 @@
+name: SpendTracker
+options:
+  bundleIdPrefix: com.amastro
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+targets:
+  SpendTracker:
+    type: application
+    platform: macOS
+    sources:
+      - SpendTrackerApp/Sources
+      - SpendTrackerApp/Assets.xcassets
+    info:
+      path: SpendTrackerApp/Info.plist
+      properties:
+        LSUIElement: true
+        NSPrincipalClass: NSApplication
+        CFBundleDisplayName: SpendTracker
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.amastro.SpendTracker
+        INFOPLIST_FILE: SpendTrackerApp/Info.plist
+        PRODUCT_NAME: SpendTracker
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+schemes:
+  SpendTracker:
+    build:
+      targets:
+        SpendTracker: all
+    run:
+      config: Debug
+    archive:
+      config: Release

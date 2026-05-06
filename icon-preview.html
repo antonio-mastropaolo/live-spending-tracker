@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpendTracker — Menu Bar Icon Preview</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #1c1c1e;
+      color: #f5f5f7;
+      font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      min-height: 100vh;
+      padding-bottom: 80px;
+    }
+
+    /* ── Menu bar strip ─────────────────────────────────────────── */
+    .menubar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #2d2d2f;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4);
+      gap: 2px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .menubar::-webkit-scrollbar { display: none; }
+
+    .menubar-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+      margin-right: auto;
+    }
+    .menubar-apple { font-size: 15px; opacity: 0.85; letter-spacing: -0.5px; }
+    .menubar-app-name { font-size: 13px; font-weight: 600; opacity: 0.9; letter-spacing: -0.1px; }
+    .menubar-menu-item { font-size: 13px; opacity: 0.75; letter-spacing: -0.1px; }
+
+    .menubar-right {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-shrink: 0;
+    }
+
+    .mb-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 0 7px;
+      height: 22px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.1s ease;
+      white-space: nowrap;
+      position: relative;
+    }
+    .mb-item:hover { background: rgba(255,255,255,0.12); }
+    .mb-item.active { background: rgba(255,255,255,0.16); }
+
+    .mb-sep {
+      width: 1px;
+      height: 14px;
+      background: rgba(255,255,255,0.12);
+      margin: 0 3px;
+    }
+
+    .mb-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      font-style: normal;
+    }
+    .mb-icon svg { display: block; }
+
+    .mb-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: rgba(245,245,247,0.9);
+      letter-spacing: -0.2px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    .mb-num {
+      position: absolute;
+      top: -1px;
+      left: 2px;
+      font-size: 7px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.35);
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    /* ── Content area ────────────────────────────────────────────── */
+    .content {
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 40px 24px 0;
+    }
+
+    .page-header { margin-bottom: 10px; }
+    .page-title {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.6px;
+      color: #f5f5f7;
+    }
+    .page-subtitle {
+      font-size: 14px;
+      color: rgba(245,245,247,0.55);
+      margin-top: 6px;
+      letter-spacing: -0.1px;
+    }
+
+    /* ── Section headers ─────────────────────────────────────────── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin: 42px 0 16px;
+    }
+    .section-header-line {
+      flex: 1;
+      height: 1px;
+      background: rgba(255,255,255,0.08);
+    }
+    .section-header-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 5px 14px;
+      flex-shrink: 0;
+    }
+    .section-header-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .section-header-dot.static { background: rgba(255,255,255,0.5); }
+    .section-header-dot.animated {
+      background: #30d158;
+      box-shadow: 0 0 6px #30d158;
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+    .section-header-text {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(245,245,247,0.55);
+    }
+
+    .section-sub-label {
+      font-size: 11px;
+      color: rgba(245,245,247,0.3);
+      margin-bottom: 14px;
+      letter-spacing: -0.1px;
+    }
+
+    /* ── Card grid ───────────────────────────────────────────────── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 12px;
+    }
+
+    .icon-card {
+      background: #2d2d2f;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 20px 12px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s, transform 0.1s;
+      position: relative;
+      user-select: none;
+    }
+    .icon-card:hover {
+      background: #3a3a3c;
+      border-color: rgba(255,255,255,0.18);
+      transform: translateY(-1px);
+    }
+    .icon-card.selected {
+      border-color: #0a84ff;
+      background: rgba(10,132,255,0.12);
+    }
+    .icon-card.selected::after {
+      content: "Selected";
+      position: absolute;
+      bottom: -1px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #0a84ff;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 0 0 13px 13px;
+    }
+
+    .card-num {
+      position: absolute;
+      top: 9px;
+      left: 12px;
+      font-size: 10px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.3);
+      line-height: 1;
+    }
+
+    .card-icon-wrap {
+      width: 64px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card-icon-wrap svg { display: block; }
+
+    .card-name {
+      font-family: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+      font-size: 9px;
+      color: rgba(245,245,247,0.4);
+      text-align: center;
+      line-height: 1.4;
+      word-break: break-all;
+      letter-spacing: -0.1px;
+    }
+
+    /* ── Preview row ─────────────────────────────────────────────── */
+    .preview-section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: rgba(245,245,247,0.4);
+      margin: 36px 0 14px;
+    }
+    .preview-row {
+      background: #2d2d2f;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .preview-row-label {
+      font-size: 11px;
+      color: rgba(245,245,247,0.4);
+      letter-spacing: 0.02em;
+      margin-right: 4px;
+    }
+    .preview-bar {
+      background: #1a1a1c;
+      border-radius: 6px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 8px;
+      gap: 2px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .preview-bar:hover { background: #2a2a2c; }
+
+    /* ── Notes ───────────────────────────────────────────────────── */
+    .notes {
+      margin-top: 32px;
+      padding: 18px 20px;
+      background: rgba(255,214,10,0.07);
+      border: 1px solid rgba(255,214,10,0.2);
+      border-radius: 12px;
+    }
+    .notes-title { font-size: 12px; font-weight: 600; color: #ffd60a; margin-bottom: 8px; }
+    .notes-body { font-size: 12px; color: rgba(245,245,247,0.6); line-height: 1.6; }
+    .notes-body code {
+      font-family: "SF Mono", "Menlo", monospace;
+      background: rgba(255,255,255,0.08);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 11px;
+      color: rgba(245,245,247,0.85);
+    }
+
+    /* ── Global keyframe animations ──────────────────────────────── */
+
+    /* Pulsing coin glow */
+    @keyframes glow-pulse {
+      0%, 100% { filter: drop-shadow(0 0 2px #30d15880); }
+      50% { filter: drop-shadow(0 0 7px #30d158cc) drop-shadow(0 0 14px #30d15844); }
+    }
+    .anim-glow-pulse { animation: glow-pulse 2s ease-in-out infinite; }
+
+    /* Gear spin */
+    @keyframes spin-gear {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    .anim-spin { animation: spin-gear 8s linear infinite; transform-origin: 50% 50%; }
+
+    /* Bar chart grow */
+    @keyframes bar1-grow {
+      0%, 100% { transform: scaleY(0.4); }
+      30% { transform: scaleY(1); }
+      60% { transform: scaleY(0.7); }
+    }
+    @keyframes bar2-grow {
+      0%, 100% { transform: scaleY(0.6); }
+      20% { transform: scaleY(0.4); }
+      50% { transform: scaleY(1); }
+      80% { transform: scaleY(0.8); }
+    }
+    @keyframes bar3-grow {
+      0%, 100% { transform: scaleY(0.8); }
+      40% { transform: scaleY(0.5); }
+      70% { transform: scaleY(1); }
+    }
+    .anim-bar1 { animation: bar1-grow 2.4s ease-in-out infinite; transform-origin: bottom center; }
+    .anim-bar2 { animation: bar2-grow 2.4s ease-in-out infinite 0.3s; transform-origin: bottom center; }
+    .anim-bar3 { animation: bar3-grow 2.4s ease-in-out infinite 0.6s; transform-origin: bottom center; }
+    .anim-bar4 { animation: bar1-grow 2.4s ease-in-out infinite 0.9s; transform-origin: bottom center; }
+
+    /* ECG draw */
+    @keyframes ecg-draw {
+      0% { stroke-dashoffset: 120; }
+      60% { stroke-dashoffset: 0; }
+      100% { stroke-dashoffset: -120; }
+    }
+    .anim-ecg {
+      stroke-dasharray: 120;
+      stroke-dashoffset: 120;
+      animation: ecg-draw 2.5s linear infinite;
+    }
+
+    /* Flame flicker */
+    @keyframes flame-flicker {
+      0%, 100% { transform: scaleY(1) scaleX(1); opacity: 1; }
+      20%       { transform: scaleY(1.06) scaleX(0.96); opacity: 0.95; }
+      40%       { transform: scaleY(0.94) scaleX(1.04); opacity: 1; }
+      60%       { transform: scaleY(1.08) scaleX(0.95); opacity: 0.92; }
+      80%       { transform: scaleY(0.97) scaleX(1.02); opacity: 1; }
+    }
+    .anim-flame { animation: flame-flicker 0.9s ease-in-out infinite; transform-origin: 50% 100%; }
+
+    /* Eye blink */
+    @keyframes eye-blink {
+      0%, 90%, 100% { transform: scaleY(1); }
+      95% { transform: scaleY(0.05); }
+    }
+    .anim-blink { animation: eye-blink 3.5s ease-in-out infinite; transform-origin: 50% 60%; }
+
+    /* Radar sweep */
+    @keyframes radar-sweep {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    .anim-radar { animation: radar-sweep 2s linear infinite; transform-origin: 10px 10px; }
+
+    /* Lightning flicker */
+    @keyframes bolt-flicker {
+      0%, 100% { opacity: 1; fill: rgba(255,255,255,0.95); }
+      30% { opacity: 0.6; fill: #ffd60a; }
+      35% { opacity: 1; fill: rgba(255,255,255,0.95); }
+      60% { opacity: 0.7; fill: #ffd60a; }
+      65% { opacity: 1; fill: rgba(255,255,255,0.95); }
+    }
+    .anim-bolt { animation: bolt-flicker 1.8s ease-in-out infinite; }
+
+    /* Coin flip */
+    @keyframes coin-flip {
+      0%   { transform: rotateY(0deg) scaleX(1); }
+      40%  { transform: rotateY(90deg) scaleX(0.05); }
+      50%  { transform: rotateY(180deg) scaleX(1); }
+      90%  { transform: rotateY(270deg) scaleX(0.05); }
+      100% { transform: rotateY(360deg) scaleX(1); }
+    }
+    .anim-coin-flip {
+      animation: coin-flip 2.2s ease-in-out infinite;
+      transform-origin: 50% 50%;
+    }
+
+    /* Shimmer sweep */
+    @keyframes shimmer {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(120%); }
+    }
+    .shimmer-container { overflow: hidden; position: relative; }
+    .shimmer-sweep {
+      position: absolute;
+      top: 0; left: 0;
+      width: 40%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+      animation: shimmer 2s ease-in-out infinite;
+    }
+
+    /* Hue rotate */
+    @keyframes hue-spin {
+      from { filter: hue-rotate(0deg); }
+      to   { filter: hue-rotate(360deg); }
+    }
+    .anim-hue { animation: hue-spin 4s linear infinite; }
+
+    /* Token badge bounce */
+    @keyframes badge-bounce {
+      0%, 100% { transform: scale(1); }
+      25% { transform: scale(1.15); }
+      50% { transform: scale(0.95); }
+      75% { transform: scale(1.08); }
+    }
+    .anim-badge { animation: badge-bounce 1.5s ease-in-out infinite; }
+
+    /* LED blink */
+    @keyframes led-blink {
+      0%, 48%, 52%, 100% { opacity: 1; }
+      50% { opacity: 0.1; }
+    }
+    .anim-led-l { animation: led-blink 1.8s ease-in-out infinite; }
+    .anim-led-r { animation: led-blink 1.8s ease-in-out infinite 0.4s; }
+
+    /* Stack coins pop */
+    @keyframes pop-plus {
+      0%, 100% { transform: translateY(0); opacity: 0; }
+      30%       { transform: translateY(-4px); opacity: 1; }
+      70%       { transform: translateY(-7px); opacity: 0.6; }
+    }
+    .anim-pop { animation: pop-plus 2s ease-in-out infinite; }
+
+    /* Speedometer sweep */
+    @keyframes needle-sweep {
+      0%, 100% { transform: rotate(-80deg); }
+      60%       { transform: rotate(30deg); }
+    }
+    .anim-needle { animation: needle-sweep 2.5s ease-in-out infinite; transform-origin: 10px 14px; }
+
+    /* Hourglass coin fall */
+    @keyframes coin-fall {
+      0% { transform: translateY(-3px); opacity: 0; }
+      30% { opacity: 1; }
+      100% { transform: translateY(7px); opacity: 0; }
+    }
+    .anim-fall1 { animation: coin-fall 1.4s ease-in infinite; }
+    .anim-fall2 { animation: coin-fall 1.4s ease-in infinite 0.35s; }
+    .anim-fall3 { animation: coin-fall 1.4s ease-in infinite 0.7s; }
+
+    /* Dollar count-up (CSS custom counter trick via opacity crossfade) */
+    @keyframes countup-0 {
+      0%, 8%   { opacity: 1; } 9%, 100% { opacity: 0; }
+    }
+    @keyframes countup-1 {
+      0%, 8%   { opacity: 0; }
+      9%, 20%  { opacity: 1; }
+      21%, 100% { opacity: 0; }
+    }
+    @keyframes countup-2 {
+      21%, 35% { opacity: 1; }
+      0%, 20%, 36%, 100% { opacity: 0; }
+    }
+    @keyframes countup-final {
+      0%, 70%  { opacity: 0; }
+      71%, 100% { opacity: 1; }
+    }
+    .count-0 { animation: countup-0 3s steps(1) infinite; }
+    .count-1 { animation: countup-1 3s steps(1) infinite; }
+    .count-final { animation: countup-final 3s steps(1) infinite; }
+
+    /* Neon glow text */
+    @keyframes neon-glow {
+      0%, 100% { text-shadow: 0 0 4px #39ff14, 0 0 10px #39ff14, 0 0 20px #39ff1477; }
+      50%       { text-shadow: 0 0 2px #39ff14, 0 0 6px #39ff14; }
+    }
+    .anim-neon { animation: neon-glow 1.5s ease-in-out infinite; }
+
+  </style>
+</head>
+<body>
+
+<!-- ── MENU BAR STRIP ──────────────────────────────────────────────── -->
+<div class="menubar" id="menubar">
+  <div class="menubar-left">
+    <span class="menubar-apple"></span>
+    <span class="menubar-app-name">SpendTracker</span>
+    <span class="menubar-menu-item">File</span>
+    <span class="menubar-menu-item">Edit</span>
+    <span class="menubar-menu-item">View</span>
+  </div>
+  <div class="menubar-right" id="mbRight"></div>
+</div>
+
+<!-- ── MAIN CONTENT ────────────────────────────────────────────────── -->
+<div class="content">
+
+  <div class="page-header">
+    <div class="page-title">Menu Bar Icon Candidates</div>
+    <div class="page-subtitle">SpendTracker · macOS menu bar · 34 candidates · Click any card to select and highlight it in the bar above.</div>
+  </div>
+
+  <!-- STATIC SECTION -->
+  <div class="section-header">
+    <div class="section-header-line"></div>
+    <div class="section-header-pill">
+      <div class="section-header-dot static"></div>
+      <div class="section-header-text">Static — 10 originals</div>
+    </div>
+    <div class="section-header-line"></div>
+  </div>
+  <div class="section-sub-label">Template-mode SF Symbols · render crisp at any size · automatic dark/light inversion</div>
+  <div class="card-grid" id="cardGridStatic"></div>
+
+  <!-- ANIMATED & COLORFUL SECTION -->
+  <div class="section-header">
+    <div class="section-header-line"></div>
+    <div class="section-header-pill">
+      <div class="section-header-dot animated"></div>
+      <div class="section-header-text">Animated &amp; Colorful — 24 new</div>
+    </div>
+    <div class="section-header-line"></div>
+  </div>
+  <div class="section-sub-label">CSS keyframes, SVG animation, gradients · animations play at menu-bar scale too</div>
+  <div class="card-grid" id="cardGridAnimated"></div>
+
+  <!-- PREVIEW ROW -->
+  <div class="preview-section-label">Side-by-side at actual menu bar size (1:1)</div>
+  <div class="preview-row" id="previewRow">
+    <span class="preview-row-label">1:1 scale</span>
+  </div>
+
+  <div class="notes" style="margin-top:32px;">
+    <div class="notes-title">Implementation notes</div>
+    <div class="notes-body">
+      Static icons: use <code>NSStatusItem</code> with <code>NSImage(systemSymbolName:)</code> in
+      <code>.template</code> rendering mode — macOS handles dark/light inversion automatically.
+      Animated icons (11–34): rendered as <code>WKWebView</code> or <code>NSView</code> with Core Animation layers.
+      Recommended size: <strong>13–14 pt</strong>, weight <strong>medium</strong>.
+      For gradient/colorful icons use <code>.alwaysOriginal</code> rendering mode.
+      Set <code>statusItem.length = NSStatusItem.variableLength</code> for the pill layout.
+    </div>
+  </div>
+
+  <div style="height:40px;"></div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   SVG icon factories — all viewBox="0 0 20 20"
+   Each returns an HTML string. `size` controls width/height attrs.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const S = {}; // icon factory namespace
+
+/* ── 1. dollarsign.circle.fill ─────────────────────────────────── */
+S.dollarCircleFill = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="10" cy="10" r="9.5" fill="rgba(255,255,255,0.9)"/>
+  <text x="10" y="14.5" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="11" font-weight="700" fill="#1c1c1e">$</text>
+</svg>`;
+
+/* ── 2. dollarsign (plain) ─────────────────────────────────────── */
+S.dollar = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <text x="10" y="15.5" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="16" font-weight="300" fill="rgba(255,255,255,0.9)">$</text>
+</svg>`;
+
+/* ── 3. chart.line.uptrend.xyaxis ──────────────────────────────── */
+S.chartTrend = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <line x1="2" y1="17" x2="2" y2="3" stroke="rgba(255,255,255,0.5)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="2" y1="17" x2="18" y2="17" stroke="rgba(255,255,255,0.5)" stroke-width="1.2" stroke-linecap="round"/>
+  <polyline points="3,15 7,10 11,12 17,4" stroke="rgba(255,255,255,0.95)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="17" cy="4" r="1.4" fill="rgba(255,255,255,0.95)"/>
+</svg>`;
+
+/* ── 4. creditcard.fill ────────────────────────────────────────── */
+S.creditCard = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="1.5" y="5" width="17" height="10" rx="1.8" fill="rgba(255,255,255,0.88)"/>
+  <rect x="1.5" y="8" width="17" height="2.5" fill="#1c1c1e" opacity="0.3"/>
+  <rect x="3" y="11.5" width="5" height="1.5" rx="0.5" fill="#1c1c1e" opacity="0.4"/>
+</svg>`;
+
+/* ── 5. bolt.circle.fill ───────────────────────────────────────── */
+S.boltCircle = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="10" cy="10" r="9.5" fill="rgba(255,255,255,0.9)"/>
+  <polygon points="11.5,3.5 7,11 10.5,11 8.5,16.5 14,8.5 10,8.5" fill="#1c1c1e"/>
+</svg>`;
+
+/* ── 6. waveform.path.ecg ──────────────────────────────────────── */
+S.ecgStatic = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <polyline points="1,10 4,10 5.5,6 7,14 8.5,5 10,15 11.5,10 13,10 14.5,8 16,12 17,10 19,10"
+    stroke="rgba(255,255,255,0.92)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>`;
+
+/* ── 7. brain ──────────────────────────────────────────────────── */
+S.brain = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M10 2.5 C8.5 2.5 7.2 3.3 6.5 4.5 C5.5 4.2 4.2 4.8 3.8 5.9
+    C2.8 6.0 2 6.9 2 8.0 C2 8.9 2.5 9.7 3.2 10.1
+    C3.0 10.5 3 11 3 11.5 C3 13.4 4.6 15 6.5 15
+    L10 15 L13.5 15 C15.4 15 17 13.4 17 11.5
+    C17 11 16.9 10.5 16.8 10.1 C17.5 9.7 18 8.9 18 8.0
+    C18 6.9 17.2 6.0 16.2 5.9 C15.8 4.8 14.5 4.2 13.5 4.5
+    C12.8 3.3 11.5 2.5 10 2.5Z" fill="rgba(255,255,255,0.88)"/>
+  <line x1="10" y1="4" x2="10" y2="15" stroke="#1c1c1e" stroke-width="1" opacity="0.35"/>
+  <path d="M6.5 7.5 Q8 9 7 11" stroke="#1c1c1e" stroke-width="0.9" fill="none" opacity="0.35"/>
+  <path d="M13.5 7.5 Q12 9 13 11" stroke="#1c1c1e" stroke-width="0.9" fill="none" opacity="0.35"/>
+</svg>`;
+
+/* ── 8. cpu ────────────────────────────────────────────────────── */
+S.cpuStatic = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="5.5" y="5.5" width="9" height="9" rx="1.5" fill="rgba(255,255,255,0.88)"/>
+  <rect x="7.5" y="7.5" width="5" height="5" rx="0.8" fill="#1c1c1e" opacity="0.45"/>
+  <line x1="7.5" y1="5.5" x2="7.5" y2="2.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="10" y1="5.5" x2="10" y2="2.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="12.5" y1="5.5" x2="12.5" y2="2.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="7.5" y1="14.5" x2="7.5" y2="17.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="10" y1="14.5" x2="10" y2="17.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="12.5" y1="14.5" x2="12.5" y2="17.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="5.5" y1="7.5" x2="2.5" y2="7.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="5.5" y1="10" x2="2.5" y2="10" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="5.5" y1="12.5" x2="2.5" y2="12.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="14.5" y1="7.5" x2="17.5" y2="7.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="14.5" y1="10" x2="17.5" y2="10" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="14.5" y1="12.5" x2="17.5" y2="12.5" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+</svg>`;
+
+/* ── 9. sparkles ───────────────────────────────────────────────── */
+S.sparkles = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M10 2 L11.2 8.8 L18 10 L11.2 11.2 L10 18 L8.8 11.2 L2 10 L8.8 8.8 Z" fill="rgba(255,255,255,0.95)"/>
+  <path d="M16 3 L16.5 5.5 L19 6 L16.5 6.5 L16 9 L15.5 6.5 L13 6 L15.5 5.5 Z" fill="rgba(255,255,255,0.65)"/>
+  <path d="M4 13 L4.4 14.6 L6 15 L4.4 15.4 L4 17 L3.6 15.4 L2 15 L3.6 14.6 Z" fill="rgba(255,255,255,0.55)"/>
+</svg>`;
+
+/* ── 10. gauge ─────────────────────────────────────────────────── */
+S.gauge = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M3 14 A7.5 7.5 0 0 1 17 14" stroke="rgba(255,255,255,0.25)" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M3 14 A7.5 7.5 0 0 1 10 6.5" stroke="rgba(255,255,255,0.85)" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <circle cx="10" cy="14" r="1.5" fill="rgba(255,255,255,0.95)"/>
+  <line x1="10" y1="14" x2="6.5" y2="8" stroke="rgba(255,255,255,0.95)" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="3.5" y1="14" x2="5" y2="14" stroke="rgba(255,255,255,0.45)" stroke-width="1" stroke-linecap="round"/>
+  <line x1="16.5" y1="14" x2="15" y2="14" stroke="rgba(255,255,255,0.45)" stroke-width="1" stroke-linecap="round"/>
+  <line x1="10" y1="6.5" x2="10" y2="8" stroke="rgba(255,255,255,0.45)" stroke-width="1" stroke-linecap="round"/>
+</svg>`;
+
+/* ════════════════════════════════════════════════════════════════════
+   ANIMATED & COLORFUL (11–34)
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── 11. Pulsing green coin with glow ring ─────────────────────── */
+S.pulsingCoin = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="anim-glow-pulse">
+  <circle cx="10" cy="10" r="8.5" fill="#1c3a26" stroke="#30d158" stroke-width="1.2"/>
+  <circle cx="10" cy="10" r="6.5" fill="#30d158" opacity="0.18"/>
+  <circle cx="10" cy="10" r="5.5" fill="#30d158" opacity="0.85"/>
+  <text x="10" y="13.5" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="7" font-weight="800" fill="#fff">$</text>
+</svg>`;
+
+/* ── 12. Counting dollar sign $0.00→$0.04 ─────────────────────── */
+S.countingDollar = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .cd-0 { animation: countup-0 3s steps(1) infinite; }
+      .cd-1 { animation: countup-1 3s steps(1) infinite; }
+      .cd-f { animation: countup-final 3s steps(1) infinite; }
+    </style>
+  </defs>
+  <text class="cd-0" x="10" y="12" text-anchor="middle" font-family="'SF Mono',monospace" font-size="5" font-weight="700" fill="rgba(255,255,255,0.9)">$0.00</text>
+  <text class="cd-1" x="10" y="12" text-anchor="middle" font-family="'SF Mono',monospace" font-size="5" font-weight="700" fill="rgba(255,255,255,0.9)" opacity="0">$0.01</text>
+  <text class="cd-f" x="10" y="12" text-anchor="middle" font-family="'SF Mono',monospace" font-size="5" font-weight="700" fill="#ffd60a" opacity="0">$0.04</text>
+  <text x="10" y="17" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="7" font-weight="300" fill="rgba(255,255,255,0.4)">today</text>
+</svg>`;
+
+/* ── 13. Spinning gear with "AI" ───────────────────────────────── */
+S.spinningGear = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g class="anim-spin">
+    <path d="M10 2.5 L11 4.2 L12.9 3.8 L13.5 5.6 L15.3 6.1 L15 8 L16.8 9 L15.8 10.7 L16.8 12.4 L15 13.4 L15.3 15.3 L13.5 15.8 L12.9 17.6 L11 17.2 L10 18.8 L9 17.2 L7.1 17.6 L6.5 15.8 L4.7 15.3 L5 13.4 L3.2 12.4 L4.2 10.7 L3.2 9 L5 8 L4.7 6.1 L6.5 5.6 L7.1 3.8 L9 4.2 Z"
+      fill="rgba(255,255,255,0.75)" stroke="none"/>
+    <circle cx="10" cy="10.65" r="5" fill="#1c1c1e"/>
+  </g>
+  <text x="10" y="13.2" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="5.5" font-weight="800" fill="rgba(255,255,255,0.95)">AI</text>
+</svg>`;
+
+/* ── 14. Animated bar chart ────────────────────────────────────── */
+S.animatedBars = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <line x1="2" y1="17" x2="18" y2="17" stroke="rgba(255,255,255,0.3)" stroke-width="0.8"/>
+  <rect class="anim-bar1" x="3" y="8" width="3" height="9" rx="1" fill="rgba(255,255,255,0.7)"/>
+  <rect class="anim-bar2" x="7.5" y="5" width="3" height="12" rx="1" fill="rgba(255,255,255,0.85)"/>
+  <rect class="anim-bar3" x="12" y="11" width="3" height="6" rx="1" fill="rgba(255,255,255,0.6)"/>
+</svg>`;
+
+/* ── 15. Heartbeat / EKG line drawing itself ───────────────────── */
+S.ecgAnimated = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <polyline class="anim-ecg"
+    points="1,10 4,10 5.5,6 7,14 8.5,5 10,15 11.5,10 13,10 14.5,8 16,12 17,10 19,10"
+    stroke="#ff375f" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>`;
+
+/* ── 16. Flickering flame ──────────────────────────────────────── */
+S.flame = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="flameGrad${sz}" x1="10" y1="2" x2="10" y2="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff9f0a"/>
+      <stop offset="50%" stop-color="#ff6b00"/>
+      <stop offset="100%" stop-color="#ff3b30"/>
+    </linearGradient>
+  </defs>
+  <g class="anim-flame">
+    <path d="M10 1.5
+      C10 1.5 14 5 13.5 8.5
+      C15 7 15.5 5.5 15.5 5.5
+      C16.5 8 16 10.5 15 12
+      C16 11.5 16.5 10.5 16.5 10.5
+      C16.5 13.5 14.5 16.5 10 18
+      C5.5 16.5 3.5 13.5 3.5 10.5
+      C3.5 10.5 4 11.5 5 12
+      C4 10.5 3.5 8 4.5 5.5
+      C4.5 5.5 5 7 6.5 8.5
+      C6 5 10 1.5 10 1.5Z"
+      fill="url(#flameGrad${sz})"/>
+    <path d="M10 8 C10 8 11.5 10 11 12.5 C12 11.5 12 10 12 10 C12.5 11.5 11.5 13.5 10 14.5 C8.5 13.5 7.5 11.5 8 10 C8 10 8 11.5 9 12.5 C8.5 10 10 8 10 8Z"
+      fill="#fff" opacity="0.5"/>
+  </g>
+</svg>`;
+
+/* ── 17. Blinking eye ──────────────────────────────────────────── */
+S.blinkingEye = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g class="anim-blink">
+    <path d="M2 10 Q10 3 18 10 Q10 17 2 10Z" fill="rgba(255,255,255,0.85)"/>
+    <circle cx="10" cy="10" r="3.5" fill="#1c1c1e"/>
+    <circle cx="10" cy="10" r="2.2" fill="#0a84ff"/>
+    <circle cx="11.2" cy="8.8" r="0.8" fill="rgba(255,255,255,0.9)"/>
+  </g>
+</svg>`;
+
+/* ── 18. Radar sweep ───────────────────────────────────────────── */
+S.radar = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="10" cy="10" r="8.5" stroke="rgba(255,255,255,0.2)" stroke-width="0.8" fill="#0d1f0d"/>
+  <circle cx="10" cy="10" r="5.5" stroke="rgba(255,255,255,0.15)" stroke-width="0.8" fill="none"/>
+  <circle cx="10" cy="10" r="2.5" stroke="rgba(255,255,255,0.1)" stroke-width="0.8" fill="none"/>
+  <g class="anim-radar">
+    <line x1="10" y1="10" x2="10" y2="1.5" stroke="#30d158" stroke-width="1.2" stroke-linecap="round" opacity="0.9"/>
+    <path d="M10 10 L10 1.5 A8.5 8.5 0 0 1 18.5 10 Z" fill="#30d158" opacity="0.12"/>
+  </g>
+  <circle cx="10" cy="10" r="1.2" fill="#30d158"/>
+  <circle cx="14.5" cy="6.5" r="1" fill="#30d158" opacity="0.7"/>
+  <circle cx="7" cy="14" r="0.8" fill="#30d158" opacity="0.45"/>
+</svg>`;
+
+/* ── 19. Lightning bolt that flickers ──────────────────────────── */
+S.lightningFlicker = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <polygon class="anim-bolt"
+    points="12,2 6.5,11 10.5,11 8,18 14.5,8 10,8"
+    fill="rgba(255,255,255,0.95)" stroke="none"/>
+</svg>`;
+
+/* ── 20. Coin flip (3D CSS rotateY) ────────────────────────────── */
+S.coinFlip = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="animation:coin-flip 2.2s ease-in-out infinite; transform-origin:50% 50%;">
+  <defs>
+    <linearGradient id="goldGrad${sz}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffd60a"/>
+      <stop offset="50%" stop-color="#ffb800"/>
+      <stop offset="100%" stop-color="#ff9500"/>
+    </linearGradient>
+  </defs>
+  <circle cx="10" cy="10" r="8.5" fill="url(#goldGrad${sz})" stroke="#b8860b" stroke-width="0.8"/>
+  <circle cx="10" cy="10" r="6.5" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="0.6"/>
+  <text x="10" y="13.5" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="9" font-weight="800" fill="rgba(255,255,255,0.85)">$</text>
+</svg>`;
+
+/* ── 21. Multicolor pie chart (Anthropic/OpenAI/Gemini) ─────────── */
+S.pieChart = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Orange slice: Anthropic (145deg arc ≈ ~40%) -->
+  <path d="M10 10 L10 1.5 A8.5 8.5 0 0 1 17.9 14.75 Z" fill="#ff6b00"/>
+  <!-- Green slice: OpenAI (≈35%) -->
+  <path d="M10 10 L17.9 14.75 A8.5 8.5 0 0 1 4.6 17.8 Z" fill="#30d158"/>
+  <!-- Blue slice: Gemini (≈25%) -->
+  <path d="M10 10 L4.6 17.8 A8.5 8.5 0 0 1 10 1.5 Z" fill="#0a84ff"/>
+  <!-- Center hole -->
+  <circle cx="10" cy="10" r="3.5" fill="#1c1c1e"/>
+  <text x="10" y="13" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="4.5" font-weight="700" fill="rgba(255,255,255,0.8)">$</text>
+</svg>`;
+
+/* ── 22. Green-to-teal gradient waveform ───────────────────────── */
+S.waveformGradient = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="waveGrad${sz}" x1="0" y1="0" x2="20" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#30d158"/>
+      <stop offset="100%" stop-color="#5ac8fa"/>
+    </linearGradient>
+  </defs>
+  <polyline points="1,10 3,10 4.5,5 6,15 7.5,3 9,16 10.5,10 12,10 13.5,7 15,13 16.5,10 19,10"
+    stroke="url(#waveGrad${sz})" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>`;
+
+/* ── 23. Purple-to-pink gradient brain ──────────────────────────── */
+S.brainGradient = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="brainGrad${sz}" x1="2" y1="2" x2="18" y2="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#bf5af2"/>
+      <stop offset="100%" stop-color="#ff375f"/>
+    </linearGradient>
+  </defs>
+  <path d="M10 2.5 C8.5 2.5 7.2 3.3 6.5 4.5 C5.5 4.2 4.2 4.8 3.8 5.9
+    C2.8 6.0 2 6.9 2 8.0 C2 8.9 2.5 9.7 3.2 10.1
+    C3.0 10.5 3 11 3 11.5 C3 13.4 4.6 15 6.5 15
+    L10 15 L13.5 15 C15.4 15 17 13.4 17 11.5
+    C17 11 16.9 10.5 16.8 10.1 C17.5 9.7 18 8.9 18 8.0
+    C18 6.9 17.2 6.0 16.2 5.9 C15.8 4.8 14.5 4.2 13.5 4.5
+    C12.8 3.3 11.5 2.5 10 2.5Z" fill="url(#brainGrad${sz})"/>
+  <line x1="10" y1="4" x2="10" y2="15" stroke="rgba(0,0,0,0.2)" stroke-width="1"/>
+  <path d="M6.5 7.5 Q8 9 7 11" stroke="rgba(0,0,0,0.2)" stroke-width="0.9" fill="none"/>
+  <path d="M13.5 7.5 Q12 9 13 11" stroke="rgba(0,0,0,0.2)" stroke-width="0.9" fill="none"/>
+</svg>`;
+
+/* ── 24. Gold coin with shimmer sweep ───────────────────────────── */
+S.goldCoin = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="goldCoinGrad${sz}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffd60a"/>
+      <stop offset="100%" stop-color="#ff9500"/>
+    </linearGradient>
+    <clipPath id="coinClip${sz}">
+      <circle cx="10" cy="10" r="8.5"/>
+    </clipPath>
+  </defs>
+  <circle cx="10" cy="10" r="8.5" fill="url(#goldCoinGrad${sz})" stroke="#b8860b" stroke-width="0.8"/>
+  <circle cx="10" cy="10" r="6.5" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="0.7"/>
+  <text x="10" y="13.8" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="10" font-weight="800" fill="rgba(180,120,0,0.7)">$</text>
+  <g clip-path="url(#coinClip${sz})" class="shimmer-container">
+    <rect x="-20" y="0" width="10" height="20" fill="rgba(255,255,255,0.45)" transform="skewX(-20)"
+      style="animation: shimmer 2s ease-in-out infinite;"/>
+  </g>
+</svg>`;
+
+/* ── 25. Rainbow gradient dollar sign (hue-rotate) ─────────────── */
+S.rainbowDollar = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="anim-hue">
+  <defs>
+    <linearGradient id="rbGrad${sz}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff375f"/>
+      <stop offset="33%" stop-color="#ffd60a"/>
+      <stop offset="66%" stop-color="#30d158"/>
+      <stop offset="100%" stop-color="#0a84ff"/>
+    </linearGradient>
+  </defs>
+  <text x="10" y="15.5" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="16" font-weight="700" fill="url(#rbGrad${sz})">$</text>
+</svg>`;
+
+/* ── 26. Fire/ember gradient chart bar ──────────────────────────── */
+S.fireBar = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fireBarGrad${sz}" x1="0" y1="18" x2="0" y2="2" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff3b30"/>
+      <stop offset="50%" stop-color="#ff9f0a"/>
+      <stop offset="100%" stop-color="#ffd60a"/>
+    </linearGradient>
+  </defs>
+  <line x1="2" y1="17" x2="18" y2="17" stroke="rgba(255,255,255,0.2)" stroke-width="0.8"/>
+  <rect x="3.5" y="10" width="3.5" height="7" rx="1" fill="url(#fireBarGrad${sz})" opacity="0.6"/>
+  <rect x="8.5" y="6" width="3.5" height="11" rx="1" fill="url(#fireBarGrad${sz})" opacity="0.8"/>
+  <rect x="13.5" y="2" width="3.5" height="15" rx="1" fill="url(#fireBarGrad${sz})"/>
+</svg>`;
+
+/* ── 27. Neon matrix $ sign ─────────────────────────────────────── */
+S.neonDollar = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="20" height="20" rx="2" fill="#0a140a"/>
+  <text x="10" y="15.5" text-anchor="middle" font-family="'SF Mono',monospace" font-size="14" font-weight="700"
+    fill="#39ff14" class="anim-neon">$</text>
+</svg>`;
+
+/* ── 28. Blue-purple gradient CPU chip ──────────────────────────── */
+S.cpuGradient = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="cpuGrad${sz}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5e5ce6"/>
+      <stop offset="100%" stop-color="#0a84ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="5.5" y="5.5" width="9" height="9" rx="2" fill="url(#cpuGrad${sz})"/>
+  <rect x="7.5" y="7.5" width="5" height="5" rx="1" fill="#1c1c1e" opacity="0.6"/>
+  <text x="10" y="12" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="4" font-weight="800" fill="rgba(255,255,255,0.85)">AI</text>
+  <line x1="7.5" y1="5.5" x2="7.5" y2="2.5" stroke="#5e5ce6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="10" y1="5.5" x2="10" y2="2.5" stroke="#5e5ce6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="12.5" y1="5.5" x2="12.5" y2="2.5" stroke="#5e5ce6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="7.5" y1="14.5" x2="7.5" y2="17.5" stroke="#0a84ff" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="10" y1="14.5" x2="10" y2="17.5" stroke="#0a84ff" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="12.5" y1="14.5" x2="12.5" y2="17.5" stroke="#0a84ff" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="5.5" y1="7.5" x2="2.5" y2="7.5" stroke="#5e5ce6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="5.5" y1="10" x2="2.5" y2="10" stroke="#5e5ce6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="5.5" y1="12.5" x2="2.5" y2="12.5" stroke="#5e5ce6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="14.5" y1="7.5" x2="17.5" y2="7.5" stroke="#0a84ff" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="14.5" y1="10" x2="17.5" y2="10" stroke="#0a84ff" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="14.5" y1="12.5" x2="17.5" y2="12.5" stroke="#0a84ff" stroke-width="1.2" stroke-linecap="round"/>
+</svg>`;
+
+/* ── 29. Orange animated token counter badge ────────────────────── */
+S.tokenBadge = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="anim-badge">
+  <defs>
+    <linearGradient id="badgeGrad${sz}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff9f0a"/>
+      <stop offset="100%" stop-color="#ff6b00"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="5" width="18" height="10" rx="5" fill="url(#badgeGrad${sz})"/>
+  <text x="10" y="12.5" text-anchor="middle" font-family="'SF Mono',monospace" font-size="5.5" font-weight="800" fill="white">tok</text>
+</svg>`;
+
+/* ── 30. "ST" monogram rounded square gradient ──────────────────── */
+S.monogram = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="stGrad${sz}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5e5ce6"/>
+      <stop offset="50%" stop-color="#bf5af2"/>
+      <stop offset="100%" stop-color="#ff375f"/>
+    </linearGradient>
+  </defs>
+  <rect x="1.5" y="1.5" width="17" height="17" rx="4.5" fill="url(#stGrad${sz})"/>
+  <text x="10" y="13.5" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="8" font-weight="800" fill="white" letter-spacing="-0.5">ST</text>
+</svg>`;
+
+/* ── 31. Tiny robot face with blinking LED eyes ─────────────────── */
+S.robot = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- antenna -->
+  <line x1="10" y1="1.5" x2="10" y2="4" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round"/>
+  <circle cx="10" cy="1.2" r="1" fill="#0a84ff"/>
+  <!-- head -->
+  <rect x="3.5" y="4" width="13" height="10" rx="2.5" fill="rgba(255,255,255,0.85)"/>
+  <!-- left eye LED -->
+  <circle class="anim-led-l" cx="7.5" cy="8.5" r="1.8" fill="#0a84ff"/>
+  <!-- right eye LED -->
+  <circle class="anim-led-r" cx="12.5" cy="8.5" r="1.8" fill="#0a84ff"/>
+  <!-- mouth -->
+  <rect x="6.5" y="11.5" width="7" height="1.2" rx="0.6" fill="rgba(0,0,0,0.2)"/>
+  <!-- neck -->
+  <rect x="8.5" y="14" width="3" height="1.5" rx="0.5" fill="rgba(255,255,255,0.5)"/>
+  <!-- body hint -->
+  <rect x="5.5" y="15.5" width="9" height="3" rx="1.5" fill="rgba(255,255,255,0.3)"/>
+</svg>`;
+
+/* ── 32. Stack of coins with "+$" popping above ─────────────────── */
+S.coinStack = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="csGold${sz}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffd60a"/>
+      <stop offset="100%" stop-color="#ff9500"/>
+    </linearGradient>
+  </defs>
+  <!-- coin stack -->
+  <ellipse cx="10" cy="16.5" rx="6.5" ry="1.5" fill="#b8860b"/>
+  <rect x="3.5" y="12.5" width="13" height="4" rx="1" fill="#ffd60a"/>
+  <ellipse cx="10" cy="12.5" rx="6.5" ry="1.5" fill="#ffb800"/>
+  <rect x="3.5" y="9.5" width="13" height="3.5" rx="1" fill="#ffc200"/>
+  <ellipse cx="10" cy="9.5" rx="6.5" ry="1.5" fill="#ffd60a"/>
+  <!-- +$ popping up -->
+  <g class="anim-pop">
+    <text x="10" y="7.5" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="5.5" font-weight="800" fill="#30d158">+$</text>
+  </g>
+</svg>`;
+
+/* ── 33. Speedometer needle sweeping ────────────────────────────── */
+S.speedometer = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- outer arc -->
+  <path d="M2.5 14.5 A8 8 0 0 1 17.5 14.5" stroke="rgba(255,255,255,0.2)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <!-- colored arc zones -->
+  <path d="M2.5 14.5 A8 8 0 0 1 8 7.3" stroke="#30d158" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M8 7.3 A8 8 0 0 1 13 7.3" stroke="#ffd60a" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M13 7.3 A8 8 0 0 1 17.5 14.5" stroke="#ff3b30" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <!-- center hub -->
+  <circle cx="10" cy="14" r="1.8" fill="rgba(255,255,255,0.9)"/>
+  <!-- animated needle -->
+  <g class="anim-needle">
+    <line x1="10" y1="14" x2="10" y2="6.5" stroke="rgba(255,255,255,0.95)" stroke-width="1.4" stroke-linecap="round"/>
+  </g>
+</svg>`;
+
+/* ── 34. Hourglass with falling pixels ──────────────────────────── */
+S.hourglass = (sz) => `
+<svg width="${sz}" height="${sz}" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- hourglass outline -->
+  <path d="M4 2 L16 2 L10 10 L16 18 L4 18 L10 10 Z" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.6)" stroke-width="1" stroke-linejoin="round"/>
+  <!-- top sand -->
+  <path d="M5.5 3 L14.5 3 L10 8.5 Z" fill="rgba(255,214,10,0.7)"/>
+  <!-- bottom sand collected -->
+  <path d="M6.5 17 L13.5 17 L10 13 Z" fill="rgba(255,214,10,0.85)"/>
+  <!-- falling coins/pixels -->
+  <rect class="anim-fall1" x="9.2" y="9" width="1.6" height="1.6" rx="0.4" fill="#ffd60a"/>
+  <rect class="anim-fall2" x="9.2" y="9" width="1.6" height="1.6" rx="0.4" fill="#ffd60a"/>
+  <rect class="anim-fall3" x="9.2" y="9" width="1.6" height="1.6" rx="0.4" fill="#ffd60a"/>
+</svg>`;
+
+/* ═══════════════════════════════════════════════════════════════════
+   Candidate definitions
+   ═══════════════════════════════════════════════════════════════════ */
+
+const staticCandidates = [
+  { num: 1,  sfName: "dollarsign.circle.fill",                  label: "Filled $ circle",  group: "static",   svgFn: S.dollarCircleFill },
+  { num: 2,  sfName: "dollarsign",                              label: "Plain $",           group: "static",   svgFn: S.dollar },
+  { num: 3,  sfName: "chart.line.uptrend.xyaxis",               label: "Trend chart",       group: "static",   svgFn: S.chartTrend },
+  { num: 4,  sfName: "creditcard.fill",                         label: "Credit card",       group: "static",   svgFn: S.creditCard },
+  { num: 5,  sfName: "bolt.circle.fill",                        label: "Bolt circle",       group: "static",   svgFn: S.boltCircle },
+  { num: 6,  sfName: "waveform.path.ecg",                       label: "ECG waveform",      group: "static",   svgFn: S.ecgStatic },
+  { num: 7,  sfName: "brain",                                   label: "Brain",             group: "static",   svgFn: S.brain },
+  { num: 8,  sfName: "cpu",                                     label: "CPU chip",          group: "static",   svgFn: S.cpuStatic },
+  { num: 9,  sfName: "sparkles",                                label: "Sparkles",          group: "static",   svgFn: S.sparkles },
+  { num: 10, sfName: "gauge.with.dots.needle.bottom.50percent", label: "Gauge",             group: "static",   svgFn: S.gauge },
+];
+
+const animatedCandidates = [
+  { num: 11, sfName: "anim.coin.glow",         label: "Pulsing coin",        group: "animated", svgFn: S.pulsingCoin },
+  { num: 12, sfName: "anim.dollar.countup",    label: "Counting dollar",     group: "animated", svgFn: S.countingDollar },
+  { num: 13, sfName: "anim.gear.ai",           label: "AI gear spin",        group: "animated", svgFn: S.spinningGear },
+  { num: 14, sfName: "anim.bars.grow",         label: "Bar chart loop",      group: "animated", svgFn: S.animatedBars },
+  { num: 15, sfName: "anim.ecg.draw",          label: "Heartbeat draw",      group: "animated", svgFn: S.ecgAnimated },
+  { num: 16, sfName: "anim.flame",             label: "Flickering flame",    group: "animated", svgFn: S.flame },
+  { num: 17, sfName: "anim.eye.blink",         label: "Blinking eye",        group: "animated", svgFn: S.blinkingEye },
+  { num: 18, sfName: "anim.radar.sweep",       label: "Radar sweep",         group: "animated", svgFn: S.radar },
+  { num: 19, sfName: "anim.bolt.flicker",      label: "Lightning flicker",   group: "animated", svgFn: S.lightningFlicker },
+  { num: 20, sfName: "anim.coin.flip",         label: "Coin flip 3D",        group: "animated", svgFn: S.coinFlip },
+  { num: 21, sfName: "color.pie.providers",    label: "Provider pie",        group: "animated", svgFn: S.pieChart },
+  { num: 22, sfName: "color.wave.teal",        label: "Teal waveform",       group: "animated", svgFn: S.waveformGradient },
+  { num: 23, sfName: "color.brain.purple",     label: "Purple brain",        group: "animated", svgFn: S.brainGradient },
+  { num: 24, sfName: "color.coin.shimmer",     label: "Gold shimmer coin",   group: "animated", svgFn: S.goldCoin },
+  { num: 25, sfName: "color.dollar.rainbow",   label: "Rainbow dollar",      group: "animated", svgFn: S.rainbowDollar },
+  { num: 26, sfName: "color.bars.fire",        label: "Fire bar chart",      group: "animated", svgFn: S.fireBar },
+  { num: 27, sfName: "color.dollar.neon",      label: "Neon matrix $",       group: "animated", svgFn: S.neonDollar },
+  { num: 28, sfName: "color.cpu.gradient",     label: "CPU gradient",        group: "animated", svgFn: S.cpuGradient },
+  { num: 29, sfName: "color.token.badge",      label: "Token badge",         group: "animated", svgFn: S.tokenBadge },
+  { num: 30, sfName: "color.monogram.st",      label: "ST monogram",         group: "animated", svgFn: S.monogram },
+  { num: 31, sfName: "concept.robot.face",     label: "Robot face",          group: "animated", svgFn: S.robot },
+  { num: 32, sfName: "concept.coin.stack",     label: "Coin stack +$",       group: "animated", svgFn: S.coinStack },
+  { num: 33, sfName: "concept.speedometer",    label: "Speedometer",         group: "animated", svgFn: S.speedometer },
+  { num: 34, sfName: "concept.hourglass.fall", label: "Hourglass pixels",    group: "animated", svgFn: S.hourglass },
+];
+
+const allCandidates = [...staticCandidates, ...animatedCandidates];
+
+/* ═══════════════════════════════════════════════════════════════════
+   Build menu bar items
+   ═══════════════════════════════════════════════════════════════════ */
+const mbRight = document.getElementById('mbRight');
+const COST_LABEL = '$0.04';
+
+allCandidates.forEach((c, i) => {
+  if (i > 0) {
+    const sep = document.createElement('div');
+    sep.className = 'mb-sep';
+    mbRight.appendChild(sep);
+  }
+  const item = document.createElement('div');
+  item.className = 'mb-item';
+  item.id = `mb-${c.num}`;
+  item.dataset.num = c.num;
+  item.title = `Option ${c.num}: ${c.sfName}`;
+  item.innerHTML = `
+    <span class="mb-num">${c.num}</span>
+    <span class="mb-icon">${c.svgFn(14)}</span>
+    <span class="mb-label">${COST_LABEL}</span>
+  `;
+  mbRight.appendChild(item);
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Build card grids
+   ═══════════════════════════════════════════════════════════════════ */
+let selectedNum = null;
+
+function buildGrid(candidates, containerId) {
+  const grid = document.getElementById(containerId);
+  candidates.forEach(c => {
+    const card = document.createElement('div');
+    card.className = 'icon-card';
+    card.id = `card-${c.num}`;
+    card.dataset.num = c.num;
+    card.innerHTML = `
+      <span class="card-num">${c.num}</span>
+      <div class="card-icon-wrap">${c.svgFn(52)}</div>
+      <div class="card-name">${c.sfName}<br><span style="color:rgba(245,245,247,0.6);font-size:9.5px;">${c.label}</span></div>
+    `;
+    card.addEventListener('click', () => selectOption(c.num));
+    grid.appendChild(card);
+  });
+}
+
+buildGrid(staticCandidates, 'cardGridStatic');
+buildGrid(animatedCandidates, 'cardGridAnimated');
+
+/* ═══════════════════════════════════════════════════════════════════
+   Build 1:1 preview row
+   ═══════════════════════════════════════════════════════════════════ */
+const previewRow = document.getElementById('previewRow');
+
+allCandidates.forEach(c => {
+  const bar = document.createElement('div');
+  bar.className = 'preview-bar';
+  bar.title = `${c.num}. ${c.sfName}`;
+  bar.id = `preview-${c.num}`;
+  bar.innerHTML = `
+    <span class="mb-icon">${c.svgFn(14)}</span>
+    <span class="mb-label" style="font-size:12px;color:rgba(245,245,247,0.85);">${COST_LABEL}</span>
+  `;
+  bar.addEventListener('click', () => selectOption(c.num));
+  previewRow.appendChild(bar);
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Selection logic
+   ═══════════════════════════════════════════════════════════════════ */
+function selectOption(num) {
+  if (selectedNum !== null) {
+    document.getElementById(`card-${selectedNum}`)?.classList.remove('selected');
+    document.getElementById(`mb-${selectedNum}`)?.classList.remove('active');
+    const oldPrev = document.getElementById(`preview-${selectedNum}`);
+    if (oldPrev) oldPrev.style.outline = '';
+  }
+
+  if (selectedNum === num) {
+    selectedNum = null;
+    return;
+  }
+
+  selectedNum = num;
+  document.getElementById(`card-${num}`)?.classList.add('selected');
+  document.getElementById(`mb-${num}`)?.classList.add('active');
+  const prev = document.getElementById(`preview-${num}`);
+  if (prev) {
+    prev.style.outline = '2px solid #0a84ff';
+    prev.style.borderRadius = '6px';
+  }
+
+  // Scroll card into view
+  document.getElementById(`card-${num}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  // Scroll mb-item into view
+  document.getElementById(`mb-${num}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+}
+</script>
+</body>
+</html>
