@@ -18,6 +18,7 @@ from aiohttp import web
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from proxy.parsers import extract_usage
+from proxy.keys import fingerprint as fingerprint_key
 from state.manager import record_usage, STATE_DIR
 
 PROVIDERS = {
@@ -33,6 +34,12 @@ _HOP_BY_HOP = frozenset(
     ["host", "transfer-encoding", "connection", "keep-alive",
      "proxy-authenticate", "proxy-authorization", "te", "trailers", "upgrade"]
 )
+
+# aiohttp auto-decompresses response bodies on `resp.read()`, so the bytes we
+# forward are plaintext. We must drop the upstream Content-Encoding (or the
+# client will try to gunzip plain bytes → ZlibError) and the upstream
+# Content-Length (which described the compressed payload).
+_RESP_STRIP = frozenset(["content-encoding", "content-length"])
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +80,12 @@ async def proxy_handler(request: web.Request) -> web.Response:
 
     body = await request.read()
     body = _inject_stream_usage(provider, body)
+    key_fp_tail = fingerprint_key(provider, request.headers, request.query_string)
     headers = _forward_headers(request.headers)
+    # Force upstream to send uncompressed bodies. Otherwise we may receive
+    # brotli/zstd which aiohttp won't auto-decompress without extra deps,
+    # and we'd forward compressed bytes after stripping Content-Encoding.
+    headers["Accept-Encoding"] = "identity"
 
     async with aiohttp.ClientSession() as session:
         async with session.request(
@@ -93,12 +105,17 @@ async def proxy_handler(request: web.Request) -> web.Response:
                     usage = extract_usage(provider, resp_body, is_streaming=is_streaming)
                     if usage:
                         in_tok, out_tok, model, cache_create, cache_read = usage
+                        kfp, ktail = (key_fp_tail or (None, None))
                         record_usage(provider, model, in_tok, out_tok,
-                                     cache_creation=cache_create, cache_read=cache_read)
+                                     cache_creation=cache_create, cache_read=cache_read,
+                                     key_fp=kfp, key_tail=ktail)
                 except Exception as exc:
                     logger.warning("Failed to record usage: %s", exc)
 
-            resp_headers = _forward_headers(resp.headers)
+            resp_headers = {
+                k: v for k, v in _forward_headers(resp.headers).items()
+                if k.lower() not in _RESP_STRIP
+            }
             return web.Response(
                 status=resp.status,
                 headers=resp_headers,

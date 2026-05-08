@@ -39,6 +39,7 @@ def _empty_state() -> dict:
         "total_usd": 0.0,
         "by_provider": {},
         "by_model": {},
+        "by_key": {},
         "cache_creation_tokens": 0,
         "cache_read_tokens": 0,
         "last_updated": datetime.now(timezone.utc).isoformat(),
@@ -65,6 +66,8 @@ def record_usage(
     output_tokens: int,
     cache_creation: int = 0,
     cache_read: int = 0,
+    key_fp: Optional[str] = None,
+    key_tail: Optional[str] = None,
 ):
     prices = _match_price(provider, model)
     cost = 0.0
@@ -83,6 +86,22 @@ def record_usage(
             bp[provider] = round(bp.get(provider, 0.0) + cost, 8)
             bm = state["by_model"]
             bm[model] = round(bm.get(model, 0.0) + cost, 8)
+            if key_fp:
+                bk = state.setdefault("by_key", {})
+                now = datetime.now(timezone.utc).isoformat()
+                entry = bk.get(key_fp) or {
+                    "tail": key_tail or "",
+                    "provider": provider,
+                    "usd": 0.0,
+                    "first_seen": now,
+                }
+                entry["usd"] = round(entry.get("usd", 0.0) + cost, 8)
+                entry["last_seen"] = now
+                # tail/provider may have been missing on an older record
+                if key_tail and not entry.get("tail"):
+                    entry["tail"] = key_tail
+                entry.setdefault("provider", provider)
+                bk[key_fp] = entry
             state["cache_creation_tokens"] = state.get("cache_creation_tokens", 0) + cache_creation
             state["cache_read_tokens"] = state.get("cache_read_tokens", 0) + cache_read
             state["last_updated"] = datetime.now(timezone.utc).isoformat()

@@ -1,10 +1,18 @@
 import Combine
 import Foundation
 
+struct KeyEntry: Identifiable {
+    let id: String           // fingerprint
+    let tail: String         // last 4 chars of the key
+    let provider: String
+    let usd: Double
+}
+
 struct SpendingState {
     var totalUSD: Double = 0
     var byProvider: [(provider: String, usd: Double)] = []
     var byModel: [(model: String, usd: Double)] = []
+    var byKey: [KeyEntry] = []
     var date: String = ""
     var lastUpdated: Date? = nil
     var cacheCreationTokens: Int = 0
@@ -59,9 +67,30 @@ final class SpendingStore: ObservableObject {
         if let bm = json["by_model"] as? [String: Double] {
             s.byModel = bm.sorted { $0.value > $1.value }.map { (model: $0.key, usd: $0.value) }
         }
+        if let bk = json["by_key"] as? [String: [String: Any]] {
+            s.byKey = bk.compactMap { (fp, info) -> KeyEntry? in
+                guard let usd = info["usd"] as? Double else { return nil }
+                let tail = (info["tail"] as? String) ?? ""
+                let provider = (info["provider"] as? String) ?? ""
+                return KeyEntry(id: fp, tail: tail, provider: provider, usd: usd)
+            }
+            .sorted { $0.usd > $1.usd }
+        }
 
         state = s
-        isStale = false
+
+        let todayISO: String = {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            f.timeZone = .current
+            return f.string(from: Date())
+        }()
+        let dateMismatch = !s.date.isEmpty && s.date != todayISO
+        let ageStale: Bool = {
+            guard let ts = s.lastUpdated else { return true }
+            return Date().timeIntervalSince(ts) > 30 * 60
+        }()
+        isStale = dateMismatch || ageStale
     }
 
     func checkProxy() {

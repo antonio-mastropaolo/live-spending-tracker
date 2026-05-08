@@ -119,6 +119,9 @@ struct MenuBarView: View {
             if state.byProvider.contains(where: { $0.usd > 0.0001 }) {
                 providerBreakdown
             }
+            if state.byKey.contains(where: { $0.usd > 0.0001 }) {
+                keyBreakdown
+            }
             proxyStatus
             footerButtons
         }
@@ -381,6 +384,81 @@ struct MenuBarView: View {
         }
     }
 
+    // MARK: – Key breakdown
+
+    private var keyBreakdown: some View {
+        let active = state.byKey.filter { $0.usd > 0.0001 }
+        return VStack(alignment: .leading, spacing: 0) {
+            Divider()
+                .overlay(Color.white.opacity(0.07))
+                .padding(.bottom, 10)
+
+            Text("BY KEY")
+                .font(.system(size: 9, weight: .ultraLight, design: .monospaced))
+                .tracking(2.5)
+                .foregroundStyle(Color.white.opacity(0.3))
+                .padding(.horizontal, 2)
+                .padding(.bottom, 8)
+
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(active) { row in
+                    keyRow(entry: row, total: state.totalUSD)
+                }
+            }
+        }
+    }
+
+    private func keyRow(entry: KeyEntry, total: Double) -> some View {
+        let color = providerColor(entry.provider)
+        let fraction: Double = total > 0 ? min(entry.usd / total, 1.0) : 0
+        let pct = total > 0 ? Int((entry.usd / total * 100).rounded()) : 0
+        let label = entry.tail.isEmpty ? "…\(entry.id.prefix(6))" : "…\(entry.tail)"
+
+        return HStack(alignment: .center, spacing: 0) {
+            color.frame(width: 2).clipShape(Rectangle())
+
+            HStack(alignment: .center, spacing: 8) {
+                HStack(spacing: 6) {
+                    Circle().fill(color).frame(width: 5, height: 5)
+                    Text(label)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .lineLimit(1)
+                    Text(entry.provider)
+                        .font(.system(size: 9, weight: .regular, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                        .lineLimit(1)
+                }
+                .frame(width: 130, alignment: .leading)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Color.white.opacity(0.06)).frame(height: 4)
+                        Rectangle().fill(color.opacity(0.85))
+                            .frame(width: geo.size.width * fraction, height: 4)
+                    }
+                    .frame(maxHeight: .infinity, alignment: .center)
+                }
+                .frame(height: 4)
+
+                Text(entry.usd, format: .currency(code: "USD"))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.75))
+                    .monospacedDigit()
+                    .frame(width: 62, alignment: .trailing)
+
+                Text("\(pct)%")
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.28))
+                    .frame(width: 30, alignment: .trailing)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color(white: 0.10))
+            .overlay(Rectangle().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
+        }
+    }
+
     // MARK: – Proxy status
 
     private var proxyStatus: some View {
@@ -405,16 +483,18 @@ struct MenuBarView: View {
 
     private func statusBadge(neonGreen: Color, alertRed: Color) -> some View {
         let running = store.proxyRunning
-        let accent  = running ? neonGreen : alertRed
-        let label   = running ? "LIVE" : "OFFLINE"
+        let stale   = store.isStale
+        let amber   = Color(red: 1.0, green: 0.62, blue: 0.0)
+        let accent: Color = !running ? alertRed : (stale ? amber : neonGreen)
+        let label:  String = !running ? "OFFLINE" : (stale ? "STALE" : "LIVE")
 
         return HStack(spacing: 6) {
             ZStack {
-                if !running {
+                if !running || stale {
                     Circle()
-                        .fill(alertRed.opacity(0.25))
+                        .fill(accent.opacity(0.25))
                         .frame(width: 13, height: 13)
-                        .modifier(PulsingHalo(color: alertRed))
+                        .modifier(PulsingHalo(color: accent))
                 }
                 Circle().fill(accent).frame(width: 7, height: 7)
             }
