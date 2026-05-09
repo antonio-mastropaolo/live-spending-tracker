@@ -5,6 +5,7 @@ and records costs to ~/.ai-spending/state.json.
 
 URL scheme: http://localhost:7778/{provider}/{rest_of_path}
 """
+import asyncio
 import json
 import logging
 import os
@@ -20,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from proxy.parsers import extract_usage
 from proxy.keys import fingerprint as fingerprint_key
 from state.manager import record_usage, STATE_DIR
+from state.reconciler import reconciler_loop, load_admin_keys
 
 PROVIDERS = {
     "anthropic":   "https://api.anthropic.com",
@@ -123,6 +125,26 @@ async def proxy_handler(request: web.Request) -> web.Response:
             )
 
 
+async def _start_reconciler(app: web.Application):
+    """If admin keys exist, run the vendor-truth reconciliation loop alongside
+    the proxy. No keys → no-op (proxy-only mode, legacy behavior)."""
+    if not load_admin_keys():
+        logger.info("reconciler: no admin keys at ~/.ai-spending/admin_keys.json — proxy-only mode")
+        return
+    app["reconciler_task"] = asyncio.create_task(reconciler_loop())
+    logger.info("reconciler: loop started")
+
+
+async def _stop_reconciler(app: web.Application):
+    task = app.get("reconciler_task")
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
 def run_server(host: str = "127.0.0.1", port: int = 7778):
     pid_file = STATE_DIR / "proxy.pid"
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -130,6 +152,8 @@ def run_server(host: str = "127.0.0.1", port: int = 7778):
 
     app = web.Application(client_max_size=50 * 1024 * 1024)  # 50 MB
     app.router.add_route("*", "/{path_info:.*}", proxy_handler)
+    app.on_startup.append(_start_reconciler)
+    app.on_cleanup.append(_stop_reconciler)
 
     try:
         web.run_app(app, host=host, port=port, access_log=None, print=None)

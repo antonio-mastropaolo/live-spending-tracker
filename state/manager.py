@@ -40,9 +40,12 @@ def _empty_state() -> dict:
         "by_provider": {},
         "by_model": {},
         "by_key": {},
+        "vendor_truth": {},   # {provider: {usd, fetched_at, source}}
+        "drift": {},          # {provider: {state, delta_pct, ...}} — see reconciler.py
         "cache_creation_tokens": 0,
         "cache_read_tokens": 0,
         "last_updated": datetime.now(timezone.utc).isoformat(),
+        "last_reconciled": None,
     }
 
 

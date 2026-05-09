@@ -484,13 +484,25 @@ struct MenuBarView: View {
     private func statusBadge(neonGreen: Color, alertRed: Color) -> some View {
         let running = store.proxyRunning
         let stale   = store.isStale
+        let drift   = store.state.anyDrift
         let amber   = Color(red: 1.0, green: 0.62, blue: 0.0)
-        let accent: Color = !running ? alertRed : (stale ? amber : neonGreen)
-        let label:  String = !running ? "OFFLINE" : (stale ? "STALE" : "LIVE")
+        // Severity order: OFFLINE > DRIFT > STALE > LIVE
+        let accent: Color
+        let label:  String
+        if !running {
+            accent = alertRed; label = "OFFLINE"
+        } else if drift {
+            accent = alertRed; label = "DRIFT"
+        } else if stale {
+            accent = amber; label = "STALE"
+        } else {
+            accent = neonGreen; label = "LIVE"
+        }
+        let urgent = !running || drift || stale
 
         return HStack(spacing: 6) {
             ZStack {
-                if !running || stale {
+                if urgent {
                     Circle()
                         .fill(accent.opacity(0.25))
                         .frame(width: 13, height: 13)

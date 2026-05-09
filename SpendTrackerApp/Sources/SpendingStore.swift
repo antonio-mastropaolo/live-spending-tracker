@@ -8,13 +8,25 @@ struct KeyEntry: Identifiable {
     let usd: Double
 }
 
+struct DriftEntry: Identifiable {
+    let id: String           // provider name doubles as id
+    let provider: String
+    let state: String        // "OK" or "DRIFT"
+    let proxyUSD: Double
+    let vendorUSD: Double
+    let deltaPct: Double
+}
+
 struct SpendingState {
     var totalUSD: Double = 0
     var byProvider: [(provider: String, usd: Double)] = []
     var byModel: [(model: String, usd: Double)] = []
     var byKey: [KeyEntry] = []
+    var drift: [DriftEntry] = []
+    var anyDrift: Bool = false
     var date: String = ""
     var lastUpdated: Date? = nil
+    var lastReconciled: Date? = nil
     var cacheCreationTokens: Int = 0
     var cacheReadTokens: Int = 0
 }
@@ -75,6 +87,23 @@ final class SpendingStore: ObservableObject {
                 return KeyEntry(id: fp, tail: tail, provider: provider, usd: usd)
             }
             .sorted { $0.usd > $1.usd }
+        }
+        if let drift = json["drift"] as? [String: [String: Any]] {
+            s.drift = drift.compactMap { (provider, info) -> DriftEntry? in
+                let state = (info["state"] as? String) ?? "OK"
+                let proxy = (info["last_proxy_usd"] as? Double) ?? 0
+                let vendor = (info["last_vendor_usd"] as? Double) ?? 0
+                let delta = (info["delta_pct"] as? Double) ?? 0
+                return DriftEntry(id: provider, provider: provider, state: state,
+                                  proxyUSD: proxy, vendorUSD: vendor, deltaPct: delta)
+            }
+            .sorted { $0.provider < $1.provider }
+            s.anyDrift = s.drift.contains { $0.state == "DRIFT" }
+        }
+        if let ts = json["last_reconciled"] as? String {
+            let fmt = ISO8601DateFormatter()
+            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            s.lastReconciled = fmt.date(from: ts) ?? ISO8601DateFormatter().date(from: ts)
         }
 
         state = s
