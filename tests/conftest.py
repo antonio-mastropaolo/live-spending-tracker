@@ -24,5 +24,10 @@ def isolate_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import registry.loader as rl
     monkeypatch.setattr(rl, "REGISTRY_DIR", fake, raising=True)
     monkeypatch.setattr(rl, "REGISTRY_FILE", fake / "registry.json", raising=True)
+    monkeypatch.setattr(rl, "BUDGETS_FILE", fake / "budgets.json", raising=True)
+
+    import state.history as sh
+    monkeypatch.setattr(sh, "HISTORY_FILE", fake / "history.json", raising=True)
+    monkeypatch.setattr(sh, "LOCK_FILE", fake / ".history.lock", raising=True)
 
     yield fake

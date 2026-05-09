@@ -35,6 +35,26 @@ REQUIRED_FIELDS = ("id", "label", "provider", "admin_key")
 
 
 @dataclass(frozen=True)
+class Budgets:
+    """Per-account spend caps. Either or both may be ``None`` — a missing
+    field means "no cap." Everything is in USD; alerts/notifier compares
+    against today's spend (daily) or month-to-date (monthly)."""
+    daily_usd: float | None = None
+    monthly_usd: float | None = None
+
+    def is_set(self) -> bool:
+        return self.daily_usd is not None or self.monthly_usd is not None
+
+    def to_dict(self) -> dict:
+        out: dict = {}
+        if self.daily_usd is not None:
+            out["daily_usd"] = self.daily_usd
+        if self.monthly_usd is not None:
+            out["monthly_usd"] = self.monthly_usd
+        return out
+
+
+@dataclass(frozen=True)
 class RegistryEntry:
     id: str
     label: str
@@ -45,6 +65,8 @@ class RegistryEntry:
     # from polling it. Default True so older registries (no `enabled` key)
     # keep behaving as before.
     enabled: bool = True
+    # Optional spend caps. ``None`` means no budget configured.
+    budgets: Budgets = field(default_factory=Budgets)
 
 
 class RegistryError(Exception):
@@ -124,6 +146,7 @@ def _validate_entry(item: object, *, position: int) -> RegistryEntry:
     enabled_raw = item.get("enabled", True)
     if not isinstance(enabled_raw, bool):
         raise ValueError("enabled must be a boolean if provided")
+    budgets = _parse_budgets(item.get("budgets"))
     return RegistryEntry(
         id=item["id"],
         label=item["label"],
@@ -131,14 +154,37 @@ def _validate_entry(item: object, *, position: int) -> RegistryEntry:
         admin_key=item["admin_key"],
         groupings=groupings,
         enabled=enabled_raw,
+        budgets=budgets,
     )
+
+
+def _parse_budgets(raw: object) -> Budgets:
+    """Tolerant budget parser. Bad values raise so the caller can skip the
+    whole entry — silently dropping a budget would be worse than dropping
+    the account, since the operator might assume the cap is in effect."""
+    if raw is None:
+        return Budgets()
+    if not isinstance(raw, dict):
+        raise ValueError("budgets must be an object if provided")
+    daily = raw.get("daily_usd")
+    monthly = raw.get("monthly_usd")
+    def _f(name: str, v: object) -> float | None:
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError(f"budgets.{name} must be a number")
+        if v < 0:
+            raise ValueError(f"budgets.{name} must be ≥ 0")
+        return float(v)
+    return Budgets(daily_usd=_f("daily_usd", daily), monthly_usd=_f("monthly_usd", monthly))
 
 
 def save(entries: list[RegistryEntry]) -> None:
     """Persist the registry list, mode 0600. Used by registry/cli.py."""
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
-    payload = [
-        {
+    payload = []
+    for e in entries:
+        item: dict = {
             "id": e.id,
             "label": e.label,
             "provider": e.provider,
@@ -146,8 +192,9 @@ def save(entries: list[RegistryEntry]) -> None:
             "groupings": list(e.groupings),
             "enabled": e.enabled,
         }
-        for e in entries
-    ]
+        if e.budgets.is_set():
+            item["budgets"] = e.budgets.to_dict()
+        payload.append(item)
     # Write to a temp file then chmod + rename so the file never exists
     # at default umask perms even briefly.
     tmp = REGISTRY_FILE.with_suffix(".tmp")
@@ -162,6 +209,54 @@ def iter_for_provider(entries: list[RegistryEntry], provider: str) -> Iterator[R
             yield e
 
 
+BUDGETS_FILE = REGISTRY_DIR / "budgets.json"
+
+
+def load_global_budgets() -> Budgets:
+    """Read ~/.ai-spending/budgets.json if present. Empty Budgets when
+    absent or malformed — global caps are optional, and a broken file
+    shouldn't break the reconciler."""
+    if not BUDGETS_FILE.exists():
+        return Budgets()
+    try:
+        raw = json.loads(BUDGETS_FILE.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("budgets.json unreadable: %s", exc)
+        return Budgets()
+    try:
+        return _parse_budgets(raw)
+    except ValueError as exc:
+        logger.warning("budgets.json invalid: %s", exc)
+        return Budgets()
+
+
+def save_global_budgets(b: Budgets) -> None:
+    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = BUDGETS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(b.to_dict(), indent=2))
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, BUDGETS_FILE)
+
+
+def set_budget(entry_id: str, budgets: Budgets) -> bool:
+    entries = load()
+    found = False
+    new_entries: list[RegistryEntry] = []
+    for e in entries:
+        if e.id == entry_id:
+            new_entries.append(RegistryEntry(
+                id=e.id, label=e.label, provider=e.provider,
+                admin_key=e.admin_key, groupings=e.groupings,
+                enabled=e.enabled, budgets=budgets,
+            ))
+            found = True
+        else:
+            new_entries.append(e)
+    if found:
+        save(new_entries)
+    return found
+
+
 def set_enabled(entry_id: str, enabled: bool) -> bool:
     """Flip the enabled bit on one entry. Returns True on success, False
     if the id isn't found. Used by the CLI and the Swift Account Detail
@@ -174,6 +269,7 @@ def set_enabled(entry_id: str, enabled: bool) -> bool:
             new_entries.append(RegistryEntry(
                 id=e.id, label=e.label, provider=e.provider,
                 admin_key=e.admin_key, groupings=e.groupings, enabled=enabled,
+                budgets=e.budgets,
             ))
             found = True
         else:

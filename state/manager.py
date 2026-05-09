@@ -114,7 +114,10 @@ def record_usage(
     cache_read: int = 0,
     key_fp: Optional[str] = None,
     key_tail: Optional[str] = None,
-):
+) -> float:
+    """Record one API call. Returns the call's USD cost so the proxy can
+    feed it directly into the burn-rate buffer without re-doing the
+    pricing lookup."""
     prices = _match_price(provider, model)
     cost = 0.0
     if prices:
@@ -154,6 +157,7 @@ def record_usage(
             _write_state(state)
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
+    return cost
 
 
 def reset_state():
@@ -271,6 +275,32 @@ def record_account_error(account_id: str, kind: str, msg: str) -> None:
             fcntl.flock(lf, fcntl.LOCK_UN)
 
 
+def get_alerts_fired() -> dict:
+    """Read alerts_fired without taking the write lock. Snapshot is fine
+    because the only writer is mark_alert_fired, called sequentially from
+    the reconciler tick."""
+    state = load_state()
+    return dict(state.get("alerts_fired") or {})
+
+
+def mark_alert_fired(key: str) -> None:
+    """Stamp `state.alerts_fired[key] = now`. Used by the budget alert
+    notifier to avoid double-firing the same alert in one UTC day/month."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = STATE_DIR / ".state.lock"
+    with open(lock_path, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            state = load_state()
+            af = dict(state.get("alerts_fired") or {})
+            af[key] = datetime.now(timezone.utc).isoformat()
+            state["alerts_fired"] = af
+            state["schema_version"] = 2
+            _write_state(state)
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
 def prune_accounts(keep_ids: set[str]) -> None:
     """Drop any account from state.json whose id isn't in `keep_ids`. Also
     sweeps stale errors[] rows for the same ids. Called by the reconciler
@@ -301,12 +331,15 @@ def prune_accounts(keep_ids: set[str]) -> None:
             fcntl.flock(lf, fcntl.LOCK_UN)
 
 
-def record_today_estimate(usd: float) -> None:
+def record_today_estimate(usd: float, burn_rate_cents_per_min: float | None = None) -> None:
     """Proxy-side today-estimate hook. Only stamps the `today_estimate`
     field; never touches v1 fields. Cheap to call from each proxy request.
 
     Called by the proxy after each successful record_usage. Reads the v1
     total_usd as authoritative source-of-truth for the laptop-local guess.
+    If ``burn_rate_cents_per_min`` is supplied, the cyan ¢/min card on
+    the Overview tier becomes live; ``None`` leaves the prior rate field
+    untouched (don't clobber a real rate with a no-rate write).
     """
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     lock_path = STATE_DIR / ".state.lock"
@@ -314,10 +347,12 @@ def record_today_estimate(usd: float) -> None:
         fcntl.flock(lf, fcntl.LOCK_EX)
         try:
             state = load_state()
-            state["today_estimate"] = {
-                "usd": round(float(usd), 6),
-                "last_updated": datetime.now(timezone.utc).isoformat(),
-            }
+            te = dict(state.get("today_estimate") or {})
+            te["usd"] = round(float(usd), 6)
+            te["last_updated"] = datetime.now(timezone.utc).isoformat()
+            if burn_rate_cents_per_min is not None:
+                te["burn_rate_cents_per_min"] = round(float(burn_rate_cents_per_min), 4)
+            state["today_estimate"] = te
             state["schema_version"] = 2
             _write_state(state)
         finally:

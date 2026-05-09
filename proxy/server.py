@@ -20,10 +20,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from proxy.parsers import extract_usage
 from proxy.keys import fingerprint as fingerprint_key
+from proxy.burn_rate import BurnRateBuffer
 from state.manager import record_usage, record_today_estimate, load_state, STATE_DIR
 from state.reconciler import reconciler_loop, load_admin_keys
 from registry.loader import REGISTRY_FILE
 from registry.reconciler import reconciler_loop as registry_reconciler_loop
+
+# One buffer per process. The proxy is single-threaded under aiohttp's
+# asyncio event loop, so this is safe to share across requests.
+_burn_buffer = BurnRateBuffer()
 
 PROVIDERS = {
     "anthropic":   "https://api.anthropic.com",
@@ -110,17 +115,24 @@ async def proxy_handler(request: web.Request) -> web.Response:
                     if usage:
                         in_tok, out_tok, model, cache_create, cache_read = usage
                         kfp, ktail = (key_fp_tail or (None, None))
-                        record_usage(provider, model, in_tok, out_tok,
-                                     cache_creation=cache_create, cache_read=cache_read,
-                                     key_fp=kfp, key_tail=ktail)
+                        # record_usage returns the per-call cost so we can
+                        # feed the burn-rate buffer with a real number rather
+                        # than re-deriving it from token deltas.
+                        call_cost = record_usage(
+                            provider, model, in_tok, out_tok,
+                            cache_creation=cache_create, cache_read=cache_read,
+                            key_fp=kfp, key_tail=ktail,
+                        ) or 0.0
+                        _burn_buffer.record(call_cost)
                         # v2 today-estimate hook. Mirror the v1 total into the
-                        # `today_estimate` field so the menu bar can render it
-                        # as a quiet ghost row alongside vendor-truth yesterday.
-                        # Cheap (one extra fcntl write) and isolated from v2
-                        # account state — never touches accounts.* fields.
+                        # `today_estimate` field plus the live ¢/min rate
+                        # so the menu bar can render the burn card.
                         if REGISTRY_FILE.exists():
                             try:
-                                record_today_estimate(load_state().get("total_usd", 0.0))
+                                record_today_estimate(
+                                    load_state().get("total_usd", 0.0),
+                                    burn_rate_cents_per_min=_burn_buffer.cents_per_min(),
+                                )
                             except Exception as inner:
                                 logger.warning("today_estimate hook failed: %s", inner)
                 except Exception as exc:

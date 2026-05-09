@@ -46,7 +46,13 @@ class VendorError(Exception):
 @dataclass
 class AccountSnapshot:
     """Normalized one-account-one-day result. Caller-friendly: every field
-    has a sensible empty default so callers can populate progressively."""
+    has a sensible empty default so callers can populate progressively.
+
+    `daily_history` is the full 90-day daily series ({date_iso: usd}) used
+    by ``state/history.py``. ``trend_7d_usd`` is the trailing 7-day slice
+    of that, served by the snapshot directly so the UI doesn't need
+    history.json to render the 7-day sparkline.
+    """
     label: str
     provider: str
     yesterday_date: str          # ISO date, the day this snapshot covers
@@ -54,6 +60,7 @@ class AccountSnapshot:
     by_workspace: dict[str, dict[str, Any]] = None  # type: ignore[assignment]
     by_key: dict[str, dict[str, Any]] = None        # type: ignore[assignment]
     trend_7d_usd: list[float] = None                # type: ignore[assignment]
+    daily_history: dict[str, float] = None          # type: ignore[assignment]
 
     def to_dict(self) -> dict:
         return {
@@ -97,6 +104,18 @@ def _last_7d_utc_window() -> tuple[str, str, list[str]]:
     fmt = "%Y-%m-%dT%H:%M:%SZ"
     days = [(week_start + timedelta(days=i)).date().isoformat() for i in range(7)]
     return week_start.strftime(fmt), today_start.strftime(fmt), days
+
+
+def _last_90d_utc_window() -> tuple[str, str, list[str]]:
+    """Return (starting_at, ending_at, [iso_date]*90) for the previous 90
+    completed days, oldest-first. Used by the per-tick fetcher to produce
+    a 90-day daily history (heatmap + forecast + WoW)."""
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    win_start = today_start - timedelta(days=90)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    days = [(win_start + timedelta(days=i)).date().isoformat() for i in range(90)]
+    return win_start.strftime(fmt), today_start.strftime(fmt), days
 
 
 # ---------------------------------------------------------------------------
@@ -176,11 +195,13 @@ def _walk_anthropic_buckets(payload: dict) -> list[dict]:
 async def _fetch_anthropic(entry: RegistryEntry) -> AccountSnapshot:
     timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT_SEC)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        # Fire the 7-day window and the workspace labels in parallel — both
-        # are independent and safe to do concurrently.
-        s7, e7, days = _last_7d_utc_window()
+        # Fire the 90-day window and the workspace labels in parallel —
+        # both are independent and safe to do concurrently. The 90-day
+        # series feeds history.json (heatmap + forecast + WoW); the
+        # trailing 7 days are sliced off for trend_7d_usd.
+        s90, e90, days_90 = _last_90d_utc_window()
         report_task = asyncio.create_task(
-            _anthropic_cost_report(session, entry.admin_key, s7, e7, entry.groupings)
+            _anthropic_cost_report(session, entry.admin_key, s90, e90, entry.groupings)
         )
         labels_task = asyncio.create_task(
             _anthropic_workspace_labels(session, entry.admin_key)
@@ -190,7 +211,8 @@ async def _fetch_anthropic(entry: RegistryEntry) -> AccountSnapshot:
 
     rows = _walk_anthropic_buckets(payload)
 
-    yest_iso = days[-1]  # last entry is yesterday
+    days = days_90               # alias — vendor returns oldest-first
+    yest_iso = days[-1]
     yesterday_rows = [r for r in rows if r["date"] == yest_iso]
 
     by_workspace: dict[str, dict[str, Any]] = defaultdict(lambda: {"label": "", "usd": 0.0})
@@ -216,10 +238,15 @@ async def _fetch_anthropic(entry: RegistryEntry) -> AccountSnapshot:
     by_workspace = {k: {**v, "usd": round(v["usd"], 4)} for k, v in by_workspace.items()}
     by_key = {k: {**v, "usd": round(v["usd"], 4)} for k, v in by_key.items()}
 
-    trend = [0.0] * 7
+    # 90-day daily totals — date_iso → usd. Build with O(1) lookups so the
+    # bucket walk stays linear in the response size.
+    daily_history: dict[str, float] = {d: 0.0 for d in days}
     for r in rows:
-        if r["date"] in days:
-            trend[days.index(r["date"])] += r["usd"]
+        if r["date"] in daily_history:
+            daily_history[r["date"]] += r["usd"]
+    daily_history = {k: round(v, 4) for k, v in daily_history.items()}
+
+    trend = [daily_history.get(d, 0.0) for d in days[-7:]]
 
     return AccountSnapshot(
         label=entry.label,
@@ -229,6 +256,7 @@ async def _fetch_anthropic(entry: RegistryEntry) -> AccountSnapshot:
         by_workspace=by_workspace,
         by_key=by_key,
         trend_7d_usd=trend,
+        daily_history=daily_history,
     )
 
 
@@ -316,8 +344,8 @@ def _walk_openai_buckets(payload: dict) -> list[dict]:
 async def _fetch_openai(entry: RegistryEntry) -> AccountSnapshot:
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today_start - timedelta(days=7)
-    days = [(week_start + timedelta(days=i)).date().isoformat() for i in range(7)]
+    win_start = today_start - timedelta(days=90)
+    days = [(win_start + timedelta(days=i)).date().isoformat() for i in range(90)]
     yest_iso = days[-1]
 
     timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT_SEC)
@@ -326,7 +354,7 @@ async def _fetch_openai(entry: RegistryEntry) -> AccountSnapshot:
             _openai_costs(
                 session,
                 entry.admin_key,
-                int(week_start.timestamp()),
+                int(win_start.timestamp()),
                 int(today_start.timestamp()),
                 entry.groupings,
             )
@@ -368,10 +396,13 @@ async def _fetch_openai(entry: RegistryEntry) -> AccountSnapshot:
     by_workspace = {k: {**v, "usd": round(v["usd"], 4)} for k, v in by_workspace.items()}
     by_key = {k: {**v, "usd": round(v["usd"], 4)} for k, v in by_key.items()}
 
-    trend = [0.0] * 7
+    daily_history: dict[str, float] = {d: 0.0 for d in days}
     for r in rows:
-        if r["date"] in days:
-            trend[days.index(r["date"])] += r["usd"]
+        if r["date"] in daily_history:
+            daily_history[r["date"]] += r["usd"]
+    daily_history = {k: round(v, 4) for k, v in daily_history.items()}
+
+    trend = [daily_history.get(d, 0.0) for d in days[-7:]]
 
     return AccountSnapshot(
         label=entry.label,
@@ -381,6 +412,7 @@ async def _fetch_openai(entry: RegistryEntry) -> AccountSnapshot:
         by_workspace=by_workspace,
         by_key=by_key,
         trend_7d_usd=trend,
+        daily_history=daily_history,
     )
 
 

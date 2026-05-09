@@ -21,8 +21,10 @@ from typing import Iterable
 
 import aiohttp
 
+from notifier.alerts import check_and_fire as fire_budget_alerts
 from registry.loader import RegistryEntry, load
 from registry.vendor import VendorError, fetch_account
+from state.history import prune_history, update_history
 from state.manager import (
     merge_account_snapshot,
     prune_accounts,
@@ -61,11 +63,28 @@ async def _reconcile_one(entry: RegistryEntry) -> None:
             pass
         return
 
+    snapshot_dict = snapshot.to_dict()
+    # Carry the operator's budget caps through to state.json so the Swift
+    # UI can render OVER pills + progress bars without parsing
+    # registry.json (which holds admin keys).
+    if entry.budgets.is_set():
+        snapshot_dict["budgets"] = entry.budgets.to_dict()
+
     try:
-        merge_account_snapshot(entry.id, snapshot.to_dict())
+        merge_account_snapshot(entry.id, snapshot_dict)
     except Exception as exc:  # pragma: no cover
         logger.warning("merge failed for %s: %s", entry.id, exc)
         record_account_error(entry.id, "internal", f"merge failed: {exc!r}")
+        return
+
+    # History rollup feeds the heatmap, forecast, and WoW deltas in the
+    # Swift UI. Failure here is non-fatal (the snapshot is already
+    # persisted) so we just log and move on.
+    if snapshot.daily_history:
+        try:
+            update_history({entry.id: snapshot.daily_history})
+        except Exception as exc:  # pragma: no cover
+            logger.warning("history update failed for %s: %s", entry.id, exc)
 
 
 async def reconcile_once(entries: Iterable[RegistryEntry] | None = None) -> int:
@@ -89,14 +108,26 @@ async def reconcile_once(entries: Iterable[RegistryEntry] | None = None) -> int:
     # otherwise a just-disabled account stays visible until the next
     # ENABLED account triggers a reconcile.
     active = [e for e in entries if e.enabled]
+    active_ids = {e.id for e in active}
     try:
-        prune_accounts({e.id for e in active})
+        prune_accounts(active_ids)
     except Exception as exc:  # pragma: no cover
         logger.warning("prune_accounts failed: %s", exc)
+    try:
+        prune_history(active_ids)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("prune_history failed: %s", exc)
 
     if not active:
         return 0
     await asyncio.gather(*(_reconcile_one(e) for e in active))
+
+    # Budget alerts run after history.json has been refreshed by the
+    # _reconcile_one calls above. Failures here are logged, never raised.
+    try:
+        fire_budget_alerts(active)
+    except Exception as exc:  # pragma: no cover — keep loop alive
+        logger.warning("budget alert pass failed: %s", exc)
     return len(active)
 
 

@@ -151,6 +151,11 @@ struct MenuBarView: View {
                     .transition(.asymmetric(
                         insertion: .move(edge: .trailing).combined(with: .opacity),
                         removal: .move(edge: .trailing).combined(with: .opacity)))
+            case .history:
+                HistoryView()
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .trailing).combined(with: .opacity)))
             }
         }
         .frame(width: 380)
@@ -254,7 +259,15 @@ private struct OverviewView: View {
 
     @ViewBuilder
     private var v2Body: some View {
-        TotalCard(usd: store.state.totalsYesterdayUSD, headline: "YESTERDAY · ALL ACCOUNTS")
+        TotalCard(
+            usd: store.state.totalsYesterdayUSD,
+            headline: "YESTERDAY · ALL ACCOUNTS",
+            forecast: store.forecastTotalEndOfMonth
+        )
+
+        if let est = store.state.todayEstimate, est.burnRateCentsPerMin > 0.5 {
+            BurnRateCard(centsPerMin: est.burnRateCentsPerMin)
+        }
 
         if !store.state.accounts.isEmpty {
             BreakdownHeader(text: "BY ACCOUNT")
@@ -264,6 +277,8 @@ private struct OverviewView: View {
                 }
             }
         }
+
+        HistoryLinkButton()
 
         if let est = store.state.todayEstimate {
             TodayEstimateGhost(estimate: est)
@@ -314,6 +329,10 @@ private struct AccountDetailView: View {
 
             if let acct = store.account(id: accountID) {
                 AccountTotalCard(account: acct)
+                if acct.budgets.isSet {
+                    BudgetProgressView(account: acct)
+                }
+                AnalyticsRow(account: acct)
                 DisableAccountButton(accountID: acct.id, label: acct.label)
                 if let err = acct.error {
                     ErrorCard(error: err)
@@ -452,6 +471,7 @@ private struct KeyDetailView: View {
 private struct TotalCard: View {
     let usd: Double
     let headline: String
+    var forecast: Double? = nil
 
     var heroColor: Color {
         if usd > 25 { return Palette.danger }
@@ -473,22 +493,29 @@ private struct TotalCard: View {
                     .frame(maxHeight: .infinity, alignment: .center)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(headline)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .tracking(1.4)
-                    .foregroundStyle(.tertiary)
-                Text(usd, format: .currency(code: "USD"))
-                    .font(.system(size: 42, weight: .bold, design: .monospaced))
-                    .monospacedDigit()
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [heroColor, heroColor.opacity(0.72)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(headline)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .tracking(1.4)
+                        .foregroundStyle(.tertiary)
+                    Text(usd, format: .currency(code: "USD"))
+                        .font(.system(size: 42, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [heroColor, heroColor.opacity(0.72)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .shadow(color: heroColor.opacity(0.45), radius: 8, x: 0, y: 2)
+                        .shadow(color: heroColor.opacity(0.45), radius: 8, x: 0, y: 2)
+                }
+                Spacer(minLength: 0)
+                if let f = forecast, f > 0 {
+                    ForecastChip(amount: f)
+                        .padding(.top, 2)
+                }
             }
             .padding(.vertical, 14)
             .padding(.leading, 18)
@@ -496,6 +523,36 @@ private struct TotalCard: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .modifier(FadeInOnAppear())
+    }
+}
+
+private struct ForecastChip: View {
+    let amount: Double
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text("EOM FORECAST")
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .tracking(0.9)
+                .foregroundStyle(Palette.cyan.opacity(0.85))
+            Text("~\(Self.compact(amount))")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Palette.cyan)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Palette.cyan.opacity(0.10))
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Palette.cyan.opacity(0.30), lineWidth: 0.5))
+        )
+    }
+
+    static func compact(_ v: Double) -> String {
+        if v >= 1000 { return String(format: "$%.1fK", v / 1000) }
+        return String(format: "$%.2f", v)
     }
 }
 
@@ -579,11 +636,20 @@ private struct AccountRow: View {
     let total: Double
     @EnvironmentObject private var store: SpendingStore
 
+    private var isOverBudget: Bool {
+        let mtd = store.monthToDateSpend(for: account.id)
+        let today = store.todaySpend(for: account.id)
+        if let cap = account.budgets.dailyUSD, today > cap { return true }
+        if let cap = account.budgets.monthlyUSD, mtd > cap { return true }
+        return false
+    }
+
     var body: some View {
         let color = providerColor(account.provider)
         let usd = account.yesterday.usd
         let fraction: Double = total > 0 ? min(usd / total, 1.0) : 0
         let pct = total > 0 ? Int((usd / total * 100).rounded()) : 0
+        let wow = store.weekOverWeek(for: account.id)
 
         return Button(action: { store.showAccount(account.id) }) {
             HStack(alignment: .center, spacing: 0) {
@@ -597,6 +663,9 @@ private struct AccountRow: View {
                             .foregroundStyle(.white.opacity(0.85))
                             .lineLimit(1)
                             .truncationMode(.tail)
+                        if isOverBudget {
+                            BudgetOverPill()
+                        }
                         if account.error != nil {
                             ErrorPill(kind: account.error!.kind)
                         }
@@ -617,12 +686,15 @@ private struct AccountRow: View {
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.78))
                         .monospacedDigit()
-                        .frame(width: 62, alignment: .trailing)
+                        .frame(width: 56, alignment: .trailing)
+
+                    WoWArrow(deltaFraction: wow)
+                        .frame(width: 38, alignment: .trailing)
 
                     Text("\(pct)%")
                         .font(.system(size: 10, weight: .regular, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.28))
-                        .frame(width: 26, alignment: .trailing)
+                        .frame(width: 22, alignment: .trailing)
 
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
@@ -636,6 +708,51 @@ private struct AccountRow: View {
         }
         .buttonStyle(.plain)
         .help("Drill into \(account.label)")
+    }
+}
+
+private struct WoWArrow: View {
+    let deltaFraction: Double?
+
+    var body: some View {
+        guard let d = deltaFraction else {
+            return AnyView(
+                Text("–")
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.25))
+            )
+        }
+        let pct = Int((abs(d) * 100).rounded())
+        let isUp = d > 0
+        let isFlat = pct == 0
+        let symbol = isFlat ? "minus" : (isUp ? "arrow.up" : "arrow.down")
+        // Up = more spend = warm; down = less = cool. Color signals direction.
+        let color: Color = isFlat ? .white.opacity(0.30)
+            : (isUp ? Palette.danger : Palette.neon)
+        return AnyView(
+            HStack(spacing: 2) {
+                Image(systemName: symbol)
+                    .font(.system(size: 8, weight: .bold))
+                Text("\(pct)%")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(color)
+        )
+    }
+}
+
+private struct BudgetOverPill: View {
+    var body: some View {
+        Text("OVER")
+            .font(.system(size: 8, weight: .bold, design: .monospaced))
+            .tracking(0.6)
+            .foregroundStyle(Palette.danger)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Palette.danger.opacity(0.15)))
     }
 }
 
@@ -1103,6 +1220,112 @@ private struct DetailRow: View {
     }
 }
 
+// MARK: - Burn rate card (live ¢/min while proxy is hot)
+
+private struct BurnRateCard: View {
+    let centsPerMin: Double
+    @State private var pulse = false
+
+    private var heat: Color {
+        // ramp neon → amber → danger as the rate climbs
+        if centsPerMin > 200 { return Palette.danger }
+        if centsPerMin > 50  { return Palette.amber }
+        return Palette.cyan
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(heat.opacity(0.20))
+                    .frame(width: 22, height: 22)
+                    .scaleEffect(pulse ? 1.25 : 1.0)
+                    .opacity(pulse ? 0.0 : 0.7)
+                    .animation(.easeOut(duration: 1.0).repeatForever(autoreverses: false), value: pulse)
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(heat)
+                    .shadow(color: heat.opacity(0.6), radius: 4)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text("BURN RATE · LIVE")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(1.0)
+                    .foregroundStyle(heat.opacity(0.9))
+                Text("trailing 60s window")
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(Self.formatRate(centsPerMin))
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundStyle(heat)
+                    .shadow(color: heat.opacity(0.45), radius: 4)
+                    .monospacedDigit()
+                Text("¢/min")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(heat.opacity(0.06))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(heat.opacity(0.30), lineWidth: 0.5))
+        )
+        .onAppear { pulse = true }
+    }
+
+    static func formatRate(_ c: Double) -> String {
+        if c >= 100 { return String(format: "%.0f", c) }
+        return String(format: "%.1f", c)
+    }
+}
+
+// MARK: - History link
+
+private struct HistoryLinkButton: View {
+    @EnvironmentObject private var store: SpendingStore
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: { store.showHistory() }) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.cyan)
+                Text("OPEN 90-DAY HISTORY")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(.white.opacity(0.85))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(hovered ? Color(white: 0.16) : Palette.cardFill)
+                    .animation(.easeInOut(duration: 0.15), value: hovered)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                        hovered ? Palette.cyan.opacity(0.30) : Palette.stroke,
+                        lineWidth: 0.5
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+    }
+}
+
 // MARK: - Disable account button
 
 private struct DisableAccountButton: View {
@@ -1114,23 +1337,27 @@ private struct DisableAccountButton: View {
 
     var body: some View {
         Button(action: handleTap) {
-            HStack(spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
                 Image(systemName: confirming ? "exclamationmark.triangle.fill" : "minus.circle")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(confirming ? Palette.danger : Palette.amber)
-                Text(confirming ? "TAP AGAIN TO CONFIRM" : "DISCARD FROM TRACKING")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(.primary.opacity(0.85))
-                Spacer()
-                Text(confirming ? "\(label) will be hidden" : "admin key kept; reversible via CLI")
-                    .font(.system(size: 9, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(confirming ? "TAP AGAIN TO CONFIRM" : "DISCARD FROM TRACKING")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .tracking(0.8)
+                        .foregroundStyle(.primary.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(confirming
+                         ? "\(label) will be hidden from totals"
+                         : "Admin key kept on disk · reversible via CLI")
+                        .font(.system(size: 9, weight: .regular, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(confirming ? Palette.danger.opacity(0.10)
@@ -1162,6 +1389,428 @@ private struct DisableAccountButton: View {
                 confirming = false
             }
         }
+    }
+}
+
+// MARK: - Budget progress + analytics
+
+private struct BudgetProgressView: View {
+    let account: AccountState
+    @EnvironmentObject private var store: SpendingStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let cap = account.budgets.dailyUSD {
+                bar(label: "TODAY",
+                    spent: store.todaySpend(for: account.id),
+                    cap:   cap)
+            }
+            if let cap = account.budgets.monthlyUSD {
+                bar(label: "MONTH",
+                    spent: store.monthToDateSpend(for: account.id),
+                    cap:   cap)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Palette.cardFill)
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Palette.stroke, lineWidth: 0.5))
+        )
+    }
+
+    @ViewBuilder
+    private func bar(label: String, spent: Double, cap: Double) -> some View {
+        let frac = cap > 0 ? min(spent / cap, 1.5) : 0
+        let color: Color = {
+            if frac >= 1.0 { return Palette.danger }
+            if frac >= 0.8 { return Palette.amber }
+            return Palette.neon
+        }()
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(1.0)
+                    .foregroundStyle(.white.opacity(0.45))
+                Spacer()
+                Text("\(formatUSD(spent)) of \(formatUSD(cap))")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(color)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.white.opacity(0.06)).frame(height: 6)
+                    Rectangle().fill(color.opacity(0.85))
+                        .frame(width: geo.size.width * min(frac, 1.0), height: 6)
+                    if frac > 1.0 {
+                        // Tip indicator showing how much over.
+                        Rectangle().fill(Palette.danger)
+                            .frame(width: 2, height: 8)
+                            .offset(x: geo.size.width - 1)
+                    }
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+            }
+            .frame(height: 6)
+        }
+    }
+
+    private func formatUSD(_ v: Double) -> String { String(format: "$%.2f", v) }
+}
+
+private struct AnalyticsRow: View {
+    let account: AccountState
+    @EnvironmentObject private var store: SpendingStore
+
+    var body: some View {
+        let mtd = store.monthToDateSpend(for: account.id)
+        let forecast = store.forecastEndOfMonth(for: account.id)
+        let wow = store.weekOverWeek(for: account.id)
+        return HStack(spacing: 8) {
+            MiniStat(label: "MTD",
+                     value: String(format: "$%.2f", mtd),
+                     accent: .white.opacity(0.85))
+            MiniStat(label: "EOM",
+                     value: forecast.map { ForecastChip.compact($0) } ?? "—",
+                     accent: Palette.cyan)
+            MiniStat(label: "WoW",
+                     value: wow.map { String(format: "%@%.0f%%", $0 >= 0 ? "+" : "", $0 * 100) } ?? "—",
+                     accent: wowColor(wow))
+        }
+    }
+
+    private func wowColor(_ d: Double?) -> Color {
+        guard let d = d else { return .white.opacity(0.4) }
+        if d > 0.05  { return Palette.danger }
+        if d < -0.05 { return Palette.neon }
+        return .white.opacity(0.7)
+    }
+}
+
+private struct MiniStat: View {
+    let label: String
+    let value: String
+    let accent: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                .tracking(0.9)
+                .foregroundStyle(.white.opacity(0.4))
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(accent)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Palette.cardFill)
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Palette.stroke, lineWidth: 0.5))
+        )
+    }
+}
+
+// MARK: - History tier (90-day heatmap)
+
+private struct HistoryView: View {
+    @EnvironmentObject private var store: SpendingStore
+    @State private var selectedDate: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            backHeader
+            HeatmapGrid(selectedDate: $selectedDate)
+            HeatmapLegend()
+            if let d = selectedDate {
+                DayDetailCard(dateISO: d, onClose: { selectedDate = nil })
+            } else {
+                HeatmapHint()
+            }
+            FooterButtons()
+        }
+        .padding(16)
+    }
+
+    private var backHeader: some View {
+        HStack(alignment: .center, spacing: 10) {
+            BackChip(label: "OVERVIEW") { store.popToOverview() }
+            Spacer()
+            HStack(spacing: 6) {
+                Image(systemName: "calendar").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.cyan)
+                Text("90-day history")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+        }
+        .padding(.bottom, 4)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Palette.stroke).frame(height: 0.5)
+        }
+    }
+}
+
+private struct HeatmapHint: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "hand.point.up.left")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            Text("Click any cell to inspect that day")
+                .font(.system(size: 10, design: .rounded))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+    }
+}
+
+private struct DayDetailCard: View {
+    let dateISO: String
+    let onClose: () -> Void
+    @EnvironmentObject private var store: SpendingStore
+
+    var body: some View {
+        let perAccount = store.history.compactMap { (aid, days) -> (String, String, Double)? in
+            guard let usd = days[dateISO], usd > 0 else { return nil }
+            let label = store.account(id: aid)?.label ?? aid
+            let provider = store.account(id: aid)?.provider ?? ""
+            return (provider, label, usd)
+        }
+        .sorted { $0.2 > $1.2 }
+        let total = perAccount.reduce(0.0) { $0 + $1.2 }
+        let displayDate = Self.prettyDate(dateISO)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.cyan)
+                Text(displayDate)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text(total, format: .currency(code: "USD"))
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundStyle(total > 0 ? Palette.cyan : .secondary)
+                    .monospacedDigit()
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+                .help("Close inspection")
+            }
+
+            if perAccount.isEmpty {
+                Text("No spend recorded on this day.")
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(Array(perAccount.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(providerColor(row.0))
+                                .frame(width: 5, height: 5)
+                            Text(row.1)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            // Per-account share of the day
+                            Text("\(Int((row.2 / max(total, 0.0001) * 100).rounded()))%")
+                                .font(.system(size: 9, weight: .regular, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.30))
+                            Text(row.2, format: .currency(code: "USD"))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .monospacedDigit()
+                                .frame(width: 62, alignment: .trailing)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(Palette.rowFill)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Palette.cyan.opacity(0.06))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Palette.cyan.opacity(0.30), lineWidth: 0.5))
+        )
+        .modifier(FadeInOnAppear())
+    }
+
+    static func prettyDate(_ iso: String) -> String {
+        let inFmt = DateFormatter()
+        inFmt.dateFormat = "yyyy-MM-dd"
+        inFmt.calendar = Calendar(identifier: .iso8601)
+        inFmt.timeZone = TimeZone(identifier: "UTC")
+        guard let d = inFmt.date(from: iso) else { return iso }
+        let outFmt = DateFormatter()
+        outFmt.dateFormat = "EEE · MMM d, yyyy"
+        return outFmt.string(from: d)
+    }
+}
+
+private struct HeatmapGrid: View {
+    @EnvironmentObject private var store: SpendingStore
+    @Binding var selectedDate: String?
+
+    private static let isoFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .iso8601)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    var body: some View {
+        let totals = store.dailyTotalsAcrossAccounts()
+        let maxV = max(totals.values.max() ?? 0.0001, 0.0001)
+        // Build a 7×13 grid (rows = day-of-week starting Mon, cols = week index).
+        // Anchor: today is at the bottom-right region; we walk back 90 days.
+        let cal = Calendar(identifier: .iso8601)
+        let today = cal.startOfDay(for: Date())
+        let weekday = cal.component(.weekday, from: today)
+        // NSCalendar weekday: Sun=1..Sat=7. Convert to Mon=0..Sun=6.
+        let isoWeekdayIdx = ((weekday + 5) % 7)
+        let columns = 13
+        let cellSize: CGFloat = 16
+        let spacing: CGFloat = 3
+
+        return VStack(spacing: spacing) {
+            ForEach(0..<7, id: \.self) { dow in
+                HStack(spacing: spacing) {
+                    ForEach(0..<columns, id: \.self) { week in
+                        let offsetFromToday =
+                            (columns - 1 - week) * 7 + (isoWeekdayIdx - dow)
+                        let cellDate = cal.date(byAdding: .day, value: -offsetFromToday, to: today) ?? today
+                        let isFuture = cellDate > today
+                        let key = Self.isoFmt.string(from: cellDate)
+                        let v = totals[key] ?? 0
+                        Cell(
+                            dateKey: key,
+                            amount: v,
+                            max: maxV,
+                            future: isFuture,
+                            selected: selectedDate == key && !isFuture,
+                            onTap: { tappedKey in
+                                if isFuture { return }
+                                // Toggle: clicking the selected cell clears it.
+                                selectedDate = (selectedDate == tappedKey) ? nil : tappedKey
+                            }
+                        )
+                        .frame(width: cellSize, height: cellSize)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Palette.cardFill)
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Palette.stroke, lineWidth: 0.5))
+        )
+    }
+
+    private struct Cell: View {
+        let dateKey: String
+        let amount: Double
+        let max: Double
+        let future: Bool
+        let selected: Bool
+        let onTap: (String) -> Void
+        @State private var hovered = false
+
+        var body: some View {
+            let frac = future ? -1 : (max > 0 ? amount / max : 0)
+            let tint = fill(frac: frac)
+            return Button(action: { onTap(dateKey) }) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(tint)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .strokeBorder(
+                                selected ? Color.white.opacity(0.95)
+                                : (hovered ? Color.white.opacity(0.55) : Color.clear),
+                                lineWidth: selected ? 1.5 : 1.0
+                            )
+                    )
+                    .scaleEffect(selected ? 1.10 : 1.0)
+                    .animation(.easeOut(duration: 0.12), value: selected)
+                    .animation(.easeOut(duration: 0.12), value: hovered)
+            }
+            .buttonStyle(.plain)
+            .disabled(future)
+            .onHover { hovered = $0 }
+            .help(future ? "—" : "\(dateKey) · $\(String(format: "%.2f", amount))")
+        }
+
+        private func fill(frac: Double) -> Color {
+            if frac < 0 { return Color.white.opacity(0.04) }   // future cells
+            if amount <= 0 { return Color.white.opacity(0.06) } // zero-spend day
+            let bucket: Color
+            switch frac {
+            case ..<0.10: bucket = Palette.cyan.opacity(0.30)
+            case ..<0.30: bucket = Palette.cyan.opacity(0.55)
+            case ..<0.55: bucket = Palette.cyan.opacity(0.80)
+            case ..<0.80: bucket = Palette.amber.opacity(0.85)
+            default:      bucket = Palette.danger.opacity(0.95)
+            }
+            return bucket
+        }
+    }
+}
+
+private struct HeatmapLegend: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("less")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.tertiary)
+            ForEach(0..<5, id: \.self) { i in
+                let c: Color = {
+                    switch i {
+                    case 0: return Palette.cyan.opacity(0.30)
+                    case 1: return Palette.cyan.opacity(0.55)
+                    case 2: return Palette.cyan.opacity(0.80)
+                    case 3: return Palette.amber.opacity(0.85)
+                    default: return Palette.danger.opacity(0.95)
+                    }
+                }()
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(c)
+                    .frame(width: 12, height: 12)
+            }
+            Text("more")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.top, 4)
     }
 }
 

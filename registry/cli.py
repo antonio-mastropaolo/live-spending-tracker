@@ -19,11 +19,15 @@ import getpass
 import sys
 
 from registry.loader import (
+    Budgets,
     REGISTRY_FILE,
     RegistryEntry,
     SUPPORTED_PROVIDERS,
     load,
+    load_global_budgets,
     save,
+    save_global_budgets,
+    set_budget,
     set_enabled,
 )
 
@@ -99,15 +103,33 @@ def cmd_add(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _fmt_budgets(b: Budgets) -> str:
+    if not b.is_set():
+        return ""
+    parts = []
+    if b.daily_usd is not None:
+        parts.append(f"d=${b.daily_usd:g}")
+    if b.monthly_usd is not None:
+        parts.append(f"m=${b.monthly_usd:g}")
+    return " · " + ",".join(parts)
+
+
 def cmd_list(_args: argparse.Namespace) -> int:
     entries = load()
     if not entries:
         print("(registry is empty — `python3 -m registry add` to add one)")
+        gb = load_global_budgets()
+        if gb.is_set():
+            print(f"global budgets: {_fmt_budgets(gb).lstrip(' · ')}")
         return 0
     width = max(len(e.id) for e in entries)
     for e in entries:
         status = "ON " if e.enabled else "OFF"
-        print(f"[{status}] {e.id:<{width}}  {e.provider:<10}  {_redact(e.admin_key):<16}  {e.label}")
+        budget_str = _fmt_budgets(e.budgets)
+        print(f"[{status}] {e.id:<{width}}  {e.provider:<10}  {_redact(e.admin_key):<16}  {e.label}{budget_str}")
+    gb = load_global_budgets()
+    if gb.is_set():
+        print(f"global: {_fmt_budgets(gb).lstrip(' · ')}")
     return 0
 
 
@@ -138,6 +160,45 @@ def cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_budget(args: argparse.Namespace) -> int:
+    """`python3 -m registry budget {set,clear,global}` dispatcher.
+
+    set:    --daily / --monthly to attach caps to one account
+    clear:  drop all caps from one account
+    global: set the cross-account caps in budgets.json
+    """
+    if args.budget_cmd == "set":
+        # At least one of --daily / --monthly required.
+        if args.daily is None and args.monthly is None:
+            print("error: pass at least one of --daily or --monthly", file=sys.stderr)
+            return 1
+        new_b = Budgets(daily_usd=args.daily, monthly_usd=args.monthly)
+        if not set_budget(args.id, new_b):
+            print(f"no entry with id {args.id!r}", file=sys.stderr)
+            return 1
+        print(f"set budgets on {args.id!r}: {_fmt_budgets(new_b).lstrip(' · ')}")
+        return 0
+
+    if args.budget_cmd == "clear":
+        if not set_budget(args.id, Budgets()):
+            print(f"no entry with id {args.id!r}", file=sys.stderr)
+            return 1
+        print(f"cleared budgets on {args.id!r}")
+        return 0
+
+    if args.budget_cmd == "global":
+        if args.daily is None and args.monthly is None and not args.clear:
+            print("error: pass --daily / --monthly, or --clear", file=sys.stderr)
+            return 1
+        new_b = Budgets() if args.clear else Budgets(daily_usd=args.daily, monthly_usd=args.monthly)
+        save_global_budgets(new_b)
+        print(f"global budgets: {_fmt_budgets(new_b).lstrip(' · ') or '(none)'}")
+        return 0
+
+    print(f"unknown budget subcommand {args.budget_cmd!r}", file=sys.stderr)
+    return 1
+
+
 def cmd_validate(_args: argparse.Namespace) -> int:
     entries = load()
     print(f"{REGISTRY_FILE}: {len(entries)} valid entry/entries.")
@@ -166,6 +227,22 @@ def main(argv: list[str] | None = None) -> int:
     p_enable.add_argument("id")
     sub.add_parser("validate", help="lint the registry; warn on bad key prefixes")
 
+    p_budget = sub.add_parser("budget", help="set, clear, or configure global spend caps")
+    bsub = p_budget.add_subparsers(dest="budget_cmd", required=True)
+    p_set = bsub.add_parser("set", help="attach budgets to one account")
+    p_set.add_argument("id")
+    p_set.add_argument("--daily",   type=float, default=None, dest="daily",
+                       help="daily cap in USD")
+    p_set.add_argument("--monthly", type=float, default=None, dest="monthly",
+                       help="monthly cap in USD")
+    p_clear = bsub.add_parser("clear", help="drop all caps from one account")
+    p_clear.add_argument("id")
+    p_global = bsub.add_parser("global", help="set or clear cross-account caps")
+    p_global.add_argument("--daily",   type=float, default=None, dest="daily")
+    p_global.add_argument("--monthly", type=float, default=None, dest="monthly")
+    p_global.add_argument("--clear",   action="store_true",
+                          help="remove all global caps")
+
     args = parser.parse_args(argv)
     return {
         "add":      cmd_add,
@@ -174,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
         "disable":  cmd_disable,
         "enable":   cmd_enable,
         "validate": cmd_validate,
+        "budget":   cmd_budget,
     }[args.cmd](args)
 
 

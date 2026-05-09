@@ -28,6 +28,13 @@ struct AccountYesterday {
     let keys: [AccountKeyEntry]
 }
 
+struct AccountBudgets: Hashable {
+    let dailyUSD: Double?
+    let monthlyUSD: Double?
+
+    var isSet: Bool { dailyUSD != nil || monthlyUSD != nil }
+}
+
 struct AccountState: Identifiable, Hashable {
     let id: String           // operator-chosen registry id
     let label: String
@@ -35,6 +42,7 @@ struct AccountState: Identifiable, Hashable {
     let yesterday: AccountYesterday
     let trend7d: [Double]
     var error: AccountError? = nil
+    var budgets: AccountBudgets = AccountBudgets(dailyUSD: nil, monthlyUSD: nil)
 
     static func == (lhs: AccountState, rhs: AccountState) -> Bool { lhs.id == rhs.id }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -49,6 +57,7 @@ struct AccountError: Hashable {
 struct TodayEstimate: Hashable {
     let usd: Double
     let lastUpdated: Date?
+    let burnRateCentsPerMin: Double  // 0 when idle; > 0 while proxy is hot
 }
 
 // MARK: - Legacy v1 carriers (still surfaced when accounts is empty)
@@ -122,6 +131,7 @@ enum NavTier: Equatable {
     case overview
     case account(id: String)
     case key(accountID: String, keyID: String)
+    case history
 }
 
 // MARK: - SpendingStore
@@ -132,9 +142,15 @@ final class SpendingStore: ObservableObject {
     @Published var proxyRunning = false
     @Published var isStale = false
     @Published var nav: NavTier = .overview
+    /// {account_id: {date_iso: usd}}. Loaded lazily and refreshed on each
+    /// reload tick. Empty when ~/.ai-spending/history.json doesn't exist
+    /// (v1-fallback or first-poll-not-yet-fired).
+    @Published var history: [String: [String: Double]] = [:]
 
     private let stateURL = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent(".ai-spending/state.json")
+    private let historyURL = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent(".ai-spending/history.json")
     private var timer: Timer?
 
     init() {
@@ -148,7 +164,32 @@ final class SpendingStore: ObservableObject {
         }
     }
 
+    /// Re-read ~/.ai-spending/history.json. Cheap (≤ 1 KB per account at
+    /// 90 days). Called from reload() so heatmap + forecast + WoW always
+    /// reflect what the reconciler last wrote.
+    private func reloadHistory() {
+        guard let data = try? Data(contentsOf: historyURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            history = [:]
+            return
+        }
+        var out: [String: [String: Double]] = [:]
+        for (aid, days) in json {
+            guard let dayMap = days as? [String: Any] else { continue }
+            var clean: [String: Double] = [:]
+            for (d, v) in dayMap {
+                if let usd = v as? Double { clean[d] = usd }
+                else if let n = v as? NSNumber { clean[d] = n.doubleValue }
+            }
+            out[aid] = clean
+        }
+        history = out
+    }
+
     func reload() {
+        reloadHistory()
+
         guard let data = try? Data(contentsOf: stateURL),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
@@ -238,7 +279,12 @@ final class SpendingStore: ObservableObject {
 
         if let te = json["today_estimate"] as? [String: Any] {
             let usd = (te["usd"] as? Double) ?? 0
-            s.todayEstimate = TodayEstimate(usd: usd, lastUpdated: parseISO(te["last_updated"]))
+            let burn = (te["burn_rate_cents_per_min"] as? Double) ?? 0
+            s.todayEstimate = TodayEstimate(
+                usd: usd,
+                lastUpdated: parseISO(te["last_updated"]),
+                burnRateCentsPerMin: burn
+            )
         }
 
         if let accts = json["accounts"] as? [String: [String: Any]] {
@@ -268,13 +314,23 @@ final class SpendingStore: ObservableObject {
                     .sorted { $0.usd > $1.usd }
                 }()
                 let trend = (info["trend_7d_usd"] as? [Double]) ?? []
+                let budgets: AccountBudgets = {
+                    guard let b = info["budgets"] as? [String: Any] else {
+                        return AccountBudgets(dailyUSD: nil, monthlyUSD: nil)
+                    }
+                    return AccountBudgets(
+                        dailyUSD: b["daily_usd"] as? Double,
+                        monthlyUSD: b["monthly_usd"] as? Double
+                    )
+                }()
                 return AccountState(
                     id: id,
                     label: label,
                     provider: provider,
                     yesterday: AccountYesterday(date: yDate, usd: yUSD, workspaces: workspaces, keys: keys),
                     trend7d: trend,
-                    error: errorsByAccount[id]
+                    error: errorsByAccount[id],
+                    budgets: budgets
                 )
             }
             .sorted { $0.yesterday.usd > $1.yesterday.usd }
@@ -283,7 +339,7 @@ final class SpendingStore: ObservableObject {
         // Drop any nav target whose account/key no longer exists — keeps
         // the popover from being stuck on a deleted entry.
         switch nav {
-        case .overview:
+        case .overview, .history:
             break
         case .account(let id):
             if !s.accounts.contains(where: { $0.id == id }) { nav = .overview }
@@ -337,12 +393,93 @@ final class SpendingStore: ObservableObject {
     // MARK: - Nav helpers
     func showAccount(_ id: String) { nav = .account(id: id) }
     func showKey(_ accountID: String, _ keyID: String) { nav = .key(accountID: accountID, keyID: keyID) }
+    func showHistory() { nav = .history }
     func popToOverview() { nav = .overview }
     func popToAccount() {
         if case .key(let aid, _) = nav { nav = .account(id: aid) } else { nav = .overview }
     }
 
     func account(id: String) -> AccountState? { state.accounts.first(where: { $0.id == id }) }
+
+    // MARK: - Derived analytics (history-backed)
+
+    private static let isoDayFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .iso8601)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Today's spend for one account (reading history.json — vendor-truth
+    /// once reconciled, otherwise empty). Month-to-date for forecast.
+    func todaySpend(for accountID: String) -> Double {
+        guard let bucket = history[accountID] else { return 0 }
+        let today = Self.isoDayFmt.string(from: Date())
+        return bucket[today] ?? 0
+    }
+
+    func monthToDateSpend(for accountID: String) -> Double {
+        guard let bucket = history[accountID] else { return 0 }
+        let prefix = String(Self.isoDayFmt.string(from: Date()).prefix(7)) + "-"
+        return bucket
+            .filter { $0.key.hasPrefix(prefix) }
+            .values
+            .reduce(0, +)
+    }
+
+    /// Linear projection: MTD ÷ days-elapsed × days-in-month. Returns nil
+    /// when there isn't enough data to project meaningfully.
+    func forecastEndOfMonth(for accountID: String) -> Double? {
+        let mtd = monthToDateSpend(for: accountID)
+        guard mtd > 0 else { return nil }
+        let cal = Calendar(identifier: .gregorian)
+        let now = Date()
+        let day = cal.component(.day, from: now)
+        guard let range = cal.range(of: .day, in: .month, for: now) else { return nil }
+        let daysInMonth = range.count
+        return mtd / Double(day) * Double(daysInMonth)
+    }
+
+    /// (this 7d / prior 7d − 1). Nil when prior 7d is zero (no
+    /// denominator → no meaningful percentage).
+    func weekOverWeek(for accountID: String) -> Double? {
+        guard let bucket = history[accountID], bucket.count >= 8 else { return nil }
+        let cal = Calendar(identifier: .gregorian)
+        let today = Date()
+        var thisWeek = 0.0
+        var lastWeek = 0.0
+        for offset in 1...14 {
+            guard let d = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
+            let key = Self.isoDayFmt.string(from: d)
+            if let v = bucket[key] {
+                if offset <= 7 { thisWeek += v } else { lastWeek += v }
+            }
+        }
+        guard lastWeek > 0 else { return nil }
+        return thisWeek / lastWeek - 1.0
+    }
+
+    /// Aggregate forecast across all accounts (sum of per-account
+    /// forecasts). Nil when none have data.
+    var forecastTotalEndOfMonth: Double? {
+        let parts = state.accounts.compactMap { forecastEndOfMonth(for: $0.id) }
+        return parts.isEmpty ? nil : parts.reduce(0, +)
+    }
+
+    /// {date_iso → total_usd} across all accounts, last 90 days. Used by
+    /// the History tier heatmap. Stable order isn't required — the view
+    /// indexes by date.
+    func dailyTotalsAcrossAccounts() -> [String: Double] {
+        var out: [String: Double] = [:]
+        for (_, days) in history {
+            for (d, v) in days {
+                out[d, default: 0] += v
+            }
+        }
+        return out
+    }
 
     func resetState() {
         let task = Process()
