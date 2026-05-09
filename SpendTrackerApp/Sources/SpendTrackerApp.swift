@@ -44,7 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] state, isStale in
                 guard let self else { return }
-                let total = state.totalUSD
+                // Headline = v2 yesterday total + today_estimate when available;
+                // falls back to v1 proxy total when registry isn't installed.
+                let total = state.headlineUSD
                 if self.lastTotal >= 0, abs(total - self.lastTotal) > 1e-9 {
                     self.flashIntensity = 1.0
                 }

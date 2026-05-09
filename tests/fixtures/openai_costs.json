@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "start_time": __TS_DAY_MINUS_6__,
+      "end_time":   __TS_DAY_MINUS_5__,
+      "results": [
+        {"amount": {"value": 0.40, "currency": "usd"}, "project_id": "proj_main", "api_key_id": "key_RNDProd"}
+      ]
+    },
+    {
+      "start_time": __TS_DAY_MINUS_5__,
+      "end_time":   __TS_DAY_MINUS_4__,
+      "results": []
+    },
+    {
+      "start_time": __TS_DAY_MINUS_4__,
+      "end_time":   __TS_DAY_MINUS_3__,
+      "results": []
+    },
+    {
+      "start_time": __TS_DAY_MINUS_3__,
+      "end_time":   __TS_DAY_MINUS_2__,
+      "results": []
+    },
+    {
+      "start_time": __TS_DAY_MINUS_2__,
+      "end_time":   __TS_DAY_MINUS_1__,
+      "results": []
+    },
+    {
+      "start_time": __TS_DAY_MINUS_1__,
+      "end_time":   __TS_YESTERDAY__,
+      "results": []
+    },
+    {
+      "start_time": __TS_YESTERDAY__,
+      "end_time":   __TS_TODAY__,
+      "results": [
+        {"amount": {"value": 3.50, "currency": "usd"}, "project_id": "proj_main", "api_key_id": "key_RNDProd"},
+        {"amount": {"value": 1.20, "currency": "usd"}, "project_id": "proj_side", "api_key_id": "key_RNDDev"}
+      ]
+    }
+  ]
+}

@@ -20,8 +20,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from proxy.parsers import extract_usage
 from proxy.keys import fingerprint as fingerprint_key
-from state.manager import record_usage, STATE_DIR
+from state.manager import record_usage, record_today_estimate, load_state, STATE_DIR
 from state.reconciler import reconciler_loop, load_admin_keys
+from registry.loader import REGISTRY_FILE
+from registry.reconciler import reconciler_loop as registry_reconciler_loop
 
 PROVIDERS = {
     "anthropic":   "https://api.anthropic.com",
@@ -111,6 +113,16 @@ async def proxy_handler(request: web.Request) -> web.Response:
                         record_usage(provider, model, in_tok, out_tok,
                                      cache_creation=cache_create, cache_read=cache_read,
                                      key_fp=kfp, key_tail=ktail)
+                        # v2 today-estimate hook. Mirror the v1 total into the
+                        # `today_estimate` field so the menu bar can render it
+                        # as a quiet ghost row alongside vendor-truth yesterday.
+                        # Cheap (one extra fcntl write) and isolated from v2
+                        # account state — never touches accounts.* fields.
+                        if REGISTRY_FILE.exists():
+                            try:
+                                record_today_estimate(load_state().get("total_usd", 0.0))
+                            except Exception as inner:
+                                logger.warning("today_estimate hook failed: %s", inner)
                 except Exception as exc:
                     logger.warning("Failed to record usage: %s", exc)
 
@@ -126,23 +138,38 @@ async def proxy_handler(request: web.Request) -> web.Response:
 
 
 async def _start_reconciler(app: web.Application):
-    """If admin keys exist, run the vendor-truth reconciliation loop alongside
-    the proxy. No keys → no-op (proxy-only mode, legacy behavior)."""
+    """If admin keys exist, run the v1 vendor-truth reconciliation loop
+    alongside the proxy. No keys → no-op (proxy-only mode, legacy behavior).
+
+    Independent of the v2 registry reconciler (started in
+    ``_start_registry_reconciler``). Both can run, neither blocks the other.
+    """
     if not load_admin_keys():
-        logger.info("reconciler: no admin keys at ~/.ai-spending/admin_keys.json — proxy-only mode")
+        logger.info("reconciler v1: no admin keys at ~/.ai-spending/admin_keys.json — skipping")
         return
     app["reconciler_task"] = asyncio.create_task(reconciler_loop())
-    logger.info("reconciler: loop started")
+    logger.info("reconciler v1: loop started")
+
+
+async def _start_registry_reconciler(app: web.Application):
+    """v2: if ~/.ai-spending/registry.json exists, run the multi-account
+    reconciler. No registry → no-op (additive-mode opt-in)."""
+    if not REGISTRY_FILE.exists():
+        logger.info("reconciler v2: no registry.json — skipping (proxy-only mode)")
+        return
+    app["registry_reconciler_task"] = asyncio.create_task(registry_reconciler_loop())
+    logger.info("reconciler v2: registry-driven loop started")
 
 
 async def _stop_reconciler(app: web.Application):
-    task = app.get("reconciler_task")
-    if task is not None:
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
+    for key in ("reconciler_task", "registry_reconciler_task"):
+        task = app.get(key)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 def run_server(host: str = "127.0.0.1", port: int = 7778):
@@ -153,6 +180,7 @@ def run_server(host: str = "127.0.0.1", port: int = 7778):
     app = web.Application(client_max_size=50 * 1024 * 1024)  # 50 MB
     app.router.add_route("*", "/{path_info:.*}", proxy_handler)
     app.on_startup.append(_start_reconciler)
+    app.on_startup.append(_start_registry_reconciler)
     app.on_cleanup.append(_stop_reconciler)
 
     try:

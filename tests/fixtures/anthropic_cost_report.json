@@ -1,0 +1,46 @@
+{
+  "data": [
+    {
+      "starting_at": "__DAY_MINUS_6__T00:00:00Z",
+      "ending_at":   "__DAY_MINUS_5__T00:00:00Z",
+      "results": [
+        {"amount": "0.50", "currency": "USD", "workspace_id": "wrk_main",  "api_key_id": "apikey_prod", "partial_key_hint": "abAbCd"}
+      ]
+    },
+    {
+      "starting_at": "__DAY_MINUS_5__T00:00:00Z",
+      "ending_at":   "__DAY_MINUS_4__T00:00:00Z",
+      "results": []
+    },
+    {
+      "starting_at": "__DAY_MINUS_4__T00:00:00Z",
+      "ending_at":   "__DAY_MINUS_3__T00:00:00Z",
+      "results": [
+        {"amount": "1.10", "currency": "USD", "workspace_id": "wrk_main", "api_key_id": "apikey_prod", "partial_key_hint": "abAbCd"}
+      ]
+    },
+    {
+      "starting_at": "__DAY_MINUS_3__T00:00:00Z",
+      "ending_at":   "__DAY_MINUS_2__T00:00:00Z",
+      "results": []
+    },
+    {
+      "starting_at": "__DAY_MINUS_2__T00:00:00Z",
+      "ending_at":   "__DAY_MINUS_1__T00:00:00Z",
+      "results": []
+    },
+    {
+      "starting_at": "__DAY_MINUS_1__T00:00:00Z",
+      "ending_at":   "__YESTERDAY__T00:00:00Z",
+      "results": []
+    },
+    {
+      "starting_at": "__YESTERDAY__T00:00:00Z",
+      "ending_at":   "__TODAY__T00:00:00Z",
+      "results": [
+        {"amount": "8.10", "currency": "USD", "workspace_id": "wrk_main", "api_key_id": "apikey_prod", "partial_key_hint": "abAbCd"},
+        {"amount": "4.33", "currency": "USD", "workspace_id": "wrk_side", "api_key_id": "apikey_dev",  "partial_key_hint": "efMnOp"}
+      ]
+    }
+  ]
+}

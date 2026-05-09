@@ -35,6 +35,10 @@ def _match_price(provider: str, model: str) -> Optional[dict]:
 
 def _empty_state() -> dict:
     return {
+        # schema_version 2 declares that v2 keys (accounts/totals/errors/
+        # today_estimate) MAY be present. v1 writers continue to populate
+        # the v1 keys below; readers must tolerate missing fields on either side.
+        "schema_version": 2,
         "date": date.today().isoformat(),
         "total_usd": 0.0,
         "by_provider": {},
@@ -52,6 +56,13 @@ def _empty_state() -> dict:
         "cache_read_tokens": 0,
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "last_reconciled": None,
+        # v2 multi-account fields. Populated by registry/reconciler.py when
+        # ~/.ai-spending/registry.json exists. Empty here so readers always
+        # see the same shape.
+        "accounts": {},                    # {account_id: {label, provider, yesterday, trend_7d_usd}}
+        "totals": {"yesterday_usd": 0.0, "trend_7d_usd": []},
+        "errors": [],                      # [{account_id, kind, msg, at}]
+        "today_estimate": None,            # {usd, last_updated} — proxy intra-day, optional
     }
 
 
@@ -60,6 +71,11 @@ def _rollover_if_stale(state: dict) -> dict:
     yesterday_* fields snapshot the previous day's totals. The previous
     day is whatever date was on the stale state — there's no in-between
     history. If state is already today, return it unchanged.
+
+    v2 fields (accounts/totals/errors/today_estimate) are preserved across
+    rollover unchanged: they're vendor-driven and live on their own daily
+    cycle keyed off `accounts.<id>.yesterday.date`. The proxy's daily
+    rollover is independent.
     """
     today = date.today().isoformat()
     if state.get("date") == today:
@@ -68,6 +84,13 @@ def _rollover_if_stale(state: dict) -> dict:
     fresh["yesterday_date"] = state.get("date")
     fresh["yesterday_by_provider"] = dict(state.get("by_provider", {}) or {})
     fresh["yesterday_total_usd"] = state.get("total_usd", 0.0) or 0.0
+    # Carry v2 fields across — they aren't rolled by the proxy's local clock.
+    fresh["accounts"] = state.get("accounts", {}) or {}
+    fresh["totals"] = state.get("totals", {"yesterday_usd": 0.0, "trend_7d_usd": []}) \
+        or {"yesterday_usd": 0.0, "trend_7d_usd": []}
+    fresh["errors"] = state.get("errors", []) or []
+    fresh["today_estimate"] = state.get("today_estimate")
+    fresh["last_reconciled"] = state.get("last_reconciled")
     return fresh
 
 
@@ -155,3 +178,147 @@ def _write_state(state: dict):
         except OSError:
             pass
         raise
+
+
+# ---------------------------------------------------------------------------
+# v2 helpers: registry-driven multi-account snapshot merging.
+#
+# These helpers are intentionally narrow. Callers (registry/reconciler.py)
+# build a per-account AccountSnapshot dict, hand it here, and we mutate the
+# `accounts.<id>` and `totals` slices under the same fcntl lock the v1
+# writers use. v1 fields (total_usd, by_provider, drift, vendor_truth, etc.)
+# are NEVER touched by these helpers — the two writers share the file but
+# never the keys.
+# ---------------------------------------------------------------------------
+
+def _recompute_totals(accounts: dict) -> dict:
+    """Sum each account's yesterday.usd into a top-level totals card."""
+    yesterday_usd = 0.0
+    # Sum a 7-element trend by aligning the per-account trends element-wise.
+    # If any account has fewer than 7 entries, pad with zeros.
+    summed_trend = [0.0] * 7
+    for acct in accounts.values():
+        y = (acct.get("yesterday") or {}).get("usd", 0.0) or 0.0
+        try:
+            yesterday_usd += float(y)
+        except (TypeError, ValueError):
+            pass
+        trend = acct.get("trend_7d_usd") or []
+        for i in range(7):
+            if i < len(trend):
+                try:
+                    summed_trend[i] += float(trend[i])
+                except (TypeError, ValueError):
+                    pass
+    return {
+        "yesterday_usd": round(yesterday_usd, 4),
+        "trend_7d_usd": [round(v, 4) for v in summed_trend],
+    }
+
+
+def merge_account_snapshot(account_id: str, snapshot: dict) -> None:
+    """Merge one account's reconciled snapshot into state.json under the
+    fcntl lock. Recomputes top-level totals.
+
+    `snapshot` shape: {label, provider, yesterday: {date, usd, by_workspace,
+    by_key}, trend_7d_usd}. Caller is responsible for filling all fields.
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = STATE_DIR / ".state.lock"
+    with open(lock_path, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            state = load_state()
+            accounts = state.setdefault("accounts", {})
+            accounts[account_id] = snapshot
+            state["totals"] = _recompute_totals(accounts)
+            state["last_reconciled"] = datetime.now(timezone.utc).isoformat()
+            state["schema_version"] = 2
+            # A successful merge clears any prior error for this account_id.
+            state["errors"] = [
+                e for e in (state.get("errors") or [])
+                if e.get("account_id") != account_id
+            ]
+            _write_state(state)
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def record_account_error(account_id: str, kind: str, msg: str) -> None:
+    """Append (or replace) a per-account error entry. Latest error per
+    (account_id, kind) wins so the errors[] doesn't grow unbounded.
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = STATE_DIR / ".state.lock"
+    with open(lock_path, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            state = load_state()
+            errors = [
+                e for e in (state.get("errors") or [])
+                if not (e.get("account_id") == account_id and e.get("kind") == kind)
+            ]
+            errors.append({
+                "account_id": account_id,
+                "kind": kind,
+                "msg": msg[:400],
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
+            state["errors"] = errors
+            state["schema_version"] = 2
+            _write_state(state)
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def prune_accounts(keep_ids: set[str]) -> None:
+    """Drop any account from state.json whose id isn't in `keep_ids`. Also
+    sweeps stale errors[] rows for the same ids. Called by the reconciler
+    each tick so that disable/remove takes effect immediately, and totals
+    excludes the removed account's spend (DESIGN: 'excluded from totals
+    + hidden')."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = STATE_DIR / ".state.lock"
+    with open(lock_path, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            state = load_state()
+            accounts = state.get("accounts") or {}
+            stale_ids = [aid for aid in accounts if aid not in keep_ids]
+            if not stale_ids:
+                return
+            for aid in stale_ids:
+                accounts.pop(aid, None)
+            state["accounts"] = accounts
+            state["totals"] = _recompute_totals(accounts)
+            state["errors"] = [
+                e for e in (state.get("errors") or [])
+                if e.get("account_id") not in stale_ids
+            ]
+            state["schema_version"] = 2
+            _write_state(state)
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def record_today_estimate(usd: float) -> None:
+    """Proxy-side today-estimate hook. Only stamps the `today_estimate`
+    field; never touches v1 fields. Cheap to call from each proxy request.
+
+    Called by the proxy after each successful record_usage. Reads the v1
+    total_usd as authoritative source-of-truth for the laptop-local guess.
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = STATE_DIR / ".state.lock"
+    with open(lock_path, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            state = load_state()
+            state["today_estimate"] = {
+                "usd": round(float(usd), 6),
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+            }
+            state["schema_version"] = 2
+            _write_state(state)
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
