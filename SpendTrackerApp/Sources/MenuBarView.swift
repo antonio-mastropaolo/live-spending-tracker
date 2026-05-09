@@ -235,6 +235,7 @@ private struct HeaderView: View {
 
 private struct OverviewView: View {
     @EnvironmentObject private var store: SpendingStore
+    @State private var heroExpanded: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -253,17 +254,33 @@ private struct OverviewView: View {
             footerButtons
         }
         .padding(16)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: heroExpanded)
     }
+
+    private func toggleHero() { heroExpanded.toggle() }
 
     // ---- v2 (multi-account) ----
 
     @ViewBuilder
     private var v2Body: some View {
-        TotalCard(
-            usd: store.state.totalsYesterdayUSD,
-            headline: "YESTERDAY · ALL ACCOUNTS",
-            forecast: store.forecastTotalEndOfMonth
-        )
+        Button(action: toggleHero) {
+            TotalCard(
+                usd: store.state.totalsYesterdayUSD,
+                headline: "YESTERDAY · ALL ACCOUNTS",
+                forecast: store.forecastTotalEndOfMonth,
+                expanded: heroExpanded
+            )
+        }
+        .buttonStyle(.plain)
+
+        if heroExpanded {
+            HeroDetailV2(usd: store.state.totalsYesterdayUSD)
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.92, anchor: .top)
+                        .combined(with: .opacity)
+                        .combined(with: .move(edge: .top)),
+                    removal: .opacity.combined(with: .move(edge: .top))))
+        }
 
         if let est = store.state.todayEstimate, est.burnRateCentsPerMin > 0.5 {
             BurnRateCard(centsPerMin: est.burnRateCentsPerMin)
@@ -289,7 +306,19 @@ private struct OverviewView: View {
 
     @ViewBuilder
     private var v1Body: some View {
-        TotalCard(usd: store.state.totalUSD, headline: "TODAY'S SPEND")
+        Button(action: toggleHero) {
+            TotalCard(usd: store.state.totalUSD, headline: "TODAY'S SPEND", expanded: heroExpanded)
+        }
+        .buttonStyle(.plain)
+
+        if heroExpanded {
+            HeroDetailV1()
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.92, anchor: .top)
+                        .combined(with: .opacity)
+                        .combined(with: .move(edge: .top)),
+                    removal: .opacity.combined(with: .move(edge: .top))))
+        }
 
         if store.state.byProvider.contains(where: { $0.usd > 0.0001 }) {
             BreakdownHeader(text: "BY PROVIDER")
@@ -472,6 +501,7 @@ private struct TotalCard: View {
     let usd: Double
     let headline: String
     var forecast: Double? = nil
+    var expanded: Bool = false
 
     var heroColor: Color {
         if usd > 25 { return Palette.danger }
@@ -484,7 +514,9 @@ private struct TotalCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Palette.cardFill)
                 .overlay(RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Palette.stroke, lineWidth: 0.5))
+                    .strokeBorder(
+                        expanded ? heroColor.opacity(0.45) : Palette.stroke,
+                        lineWidth: expanded ? 1.0 : 0.5))
 
             GeometryReader { geo in
                 RoundedRectangle(cornerRadius: 1)
@@ -495,10 +527,15 @@ private struct TotalCard: View {
 
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(headline)
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .tracking(1.4)
-                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 6) {
+                        Text(headline)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .tracking(1.4)
+                            .foregroundStyle(.tertiary)
+                        Image(systemName: expanded ? "chevron.up.circle.fill" : "chevron.down.circle")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(expanded ? 0.75 : 0.35))
+                    }
                     Text(usd, format: .currency(code: "USD"))
                         .font(.system(size: 42, weight: .bold, design: .monospaced))
                         .monospacedDigit()
@@ -523,6 +560,7 @@ private struct TotalCard: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .modifier(FadeInOnAppear())
+        .help(expanded ? "Collapse" : "Click to expand the day")
     }
 }
 
@@ -1217,6 +1255,231 @@ private struct DetailRow: View {
                 .truncationMode(.middle)
             Spacer()
         }
+    }
+}
+
+// MARK: - Hero detail expansion (click the total card → "explode")
+//
+// Two flavors: v1 (proxy-only today) and v2 (multi-account yesterday).
+// Both share the cyan-tinted card chrome so the user reads them as
+// "this is a deeper look at the headline number above."
+
+private struct HeroDetailV1: View {
+    @EnvironmentObject private var store: SpendingStore
+
+    var body: some View {
+        let s = store.state
+        return VStack(alignment: .leading, spacing: 10) {
+            HeroDetailHeader(label: "TODAY · \(s.date.isEmpty ? "—" : s.date)",
+                              total: s.totalUSD)
+
+            // Token rollup — surfaced even when zero so the user sees they
+            // exist. Values are running totals for the proxy's current day.
+            HStack(spacing: 8) {
+                MiniStat(label: "CACHE HIT",
+                         value: formatTokens(s.cacheReadTokens),
+                         accent: Palette.cyan)
+                MiniStat(label: "CACHE WRITE",
+                         value: formatTokens(s.cacheCreationTokens),
+                         accent: Color(red: 0.72, green: 0.45, blue: 1.0))
+                MiniStat(label: "MODELS",
+                         value: "\(s.byModel.filter { $0.usd > 0.0001 }.count)",
+                         accent: .white.opacity(0.85))
+            }
+
+            let topModels = s.byModel.filter { $0.usd > 0.0001 }.prefix(5)
+            if !topModels.isEmpty {
+                BreakdownHeader(text: "TOP MODELS")
+                VStack(spacing: 1) {
+                    ForEach(Array(topModels), id: \.model) { row in
+                        HeroDetailRow(label: row.model, usd: row.usd, total: s.totalUSD,
+                                      accent: Palette.cyan, mono: true)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Palette.cyan.opacity(0.05))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Palette.cyan.opacity(0.25), lineWidth: 0.5))
+        )
+    }
+
+    private func formatTokens(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000     { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+}
+
+private struct HeroDetailV2: View {
+    @EnvironmentObject private var store: SpendingStore
+    let usd: Double
+
+    var body: some View {
+        let yest = store.state.accounts.first?.yesterday.date ?? "—"
+
+        // Aggregate workspaces / keys across accounts for "yesterday."
+        var wsAgg: [(label: String, usd: Double, provider: String)] = []
+        var keyAgg: [(label: String, tail: String, usd: Double, provider: String)] = []
+        for acct in store.state.accounts {
+            for ws in acct.yesterday.workspaces {
+                wsAgg.append((ws.label, ws.usd, acct.provider))
+            }
+            for k in acct.yesterday.keys {
+                keyAgg.append((k.label, k.tail, k.usd, acct.provider))
+            }
+        }
+        let topWorkspaces = wsAgg.sorted { $0.usd > $1.usd }.prefix(5)
+        let topKeys = keyAgg.sorted { $0.usd > $1.usd }.prefix(5)
+
+        let totalsForecast = store.forecastTotalEndOfMonth ?? 0
+        let mtdAcrossAccounts: Double = {
+            var sum = 0.0
+            for acct in store.state.accounts {
+                sum += store.monthToDateSpend(for: acct.id)
+            }
+            return sum
+        }()
+        let wowAcrossAccounts: Double? = {
+            // Use aggregate history: this 7d / prior 7d − 1.
+            let cal = Calendar(identifier: .gregorian)
+            let isoFmt = DateFormatter()
+            isoFmt.dateFormat = "yyyy-MM-dd"
+            isoFmt.calendar = Calendar(identifier: .iso8601)
+            isoFmt.timeZone = TimeZone(identifier: "UTC")
+            let totals = store.dailyTotalsAcrossAccounts()
+            var thisWeek = 0.0
+            var lastWeek = 0.0
+            let today = Date()
+            for offset in 1...14 {
+                guard let d = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
+                let key = isoFmt.string(from: d)
+                if let v = totals[key] {
+                    if offset <= 7 { thisWeek += v } else { lastWeek += v }
+                }
+            }
+            guard lastWeek > 0 else { return nil }
+            return thisWeek / lastWeek - 1.0
+        }()
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HeroDetailHeader(label: "YESTERDAY · \(yest)", total: usd)
+
+            HStack(spacing: 8) {
+                MiniStat(label: "MTD",
+                         value: String(format: "$%.2f", mtdAcrossAccounts),
+                         accent: .white.opacity(0.85))
+                MiniStat(label: "EOM",
+                         value: totalsForecast > 0 ? ForecastChip.compact(totalsForecast) : "—",
+                         accent: Palette.cyan)
+                MiniStat(label: "WoW",
+                         value: wowAcrossAccounts.map { String(format: "%@%.0f%%", $0 >= 0 ? "+" : "", $0 * 100) } ?? "—",
+                         accent: wowAcrossAccounts.map { $0 > 0.05 ? Palette.danger : ($0 < -0.05 ? Palette.neon : .white.opacity(0.7)) } ?? .white.opacity(0.4))
+            }
+
+            if !topWorkspaces.isEmpty {
+                BreakdownHeader(text: "TOP WORKSPACES · YESTERDAY")
+                VStack(spacing: 1) {
+                    ForEach(Array(topWorkspaces.enumerated()), id: \.offset) { _, row in
+                        HeroDetailRow(label: row.label, usd: row.usd, total: usd,
+                                      accent: providerColor(row.provider), mono: false)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+            if !topKeys.isEmpty {
+                BreakdownHeader(text: "TOP KEYS · YESTERDAY")
+                VStack(spacing: 1) {
+                    ForEach(Array(topKeys.enumerated()), id: \.offset) { _, row in
+                        let display = row.tail.isEmpty ? row.label : "…\(row.tail)\(row.label.isEmpty ? "" : " · \(row.label)")"
+                        HeroDetailRow(label: display, usd: row.usd, total: usd,
+                                      accent: providerColor(row.provider), mono: true)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Palette.cyan.opacity(0.05))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Palette.cyan.opacity(0.25), lineWidth: 0.5))
+        )
+    }
+}
+
+private struct HeroDetailHeader: View {
+    let label: String
+    let total: Double
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "rectangle.expand.vertical")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Palette.cyan)
+            Text(label)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .tracking(1.0)
+                .foregroundStyle(.white.opacity(0.85))
+            Spacer()
+            Text(total, format: .currency(code: "USD"))
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(Palette.cyan)
+                .monospacedDigit()
+        }
+    }
+}
+
+private struct HeroDetailRow: View {
+    let label: String
+    let usd: Double
+    let total: Double
+    let accent: Color
+    let mono: Bool
+
+    var body: some View {
+        let frac: Double = total > 0 ? min(usd / total, 1.0) : 0
+        let pct = total > 0 ? Int((usd / total * 100).rounded()) : 0
+        return HStack(spacing: 8) {
+            Circle().fill(accent).frame(width: 5, height: 5)
+            Text(label)
+                .font(.system(size: 11, weight: .medium,
+                              design: mono ? .monospaced : .rounded))
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 6)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.white.opacity(0.06)).frame(height: 4)
+                    Rectangle().fill(accent.opacity(0.85))
+                        .frame(width: geo.size.width * frac, height: 4)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+            .frame(maxWidth: 70, maxHeight: .infinity)
+            .frame(height: 4)
+            Text(usd, format: .currency(code: "USD"))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.78))
+                .monospacedDigit()
+                .frame(width: 56, alignment: .trailing)
+            Text("\(pct)%")
+                .font(.system(size: 9, weight: .regular, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.30))
+                .frame(width: 26, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Palette.rowFill)
     }
 }
 
