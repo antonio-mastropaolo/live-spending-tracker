@@ -43,6 +43,28 @@ struct AccountState: Identifiable, Hashable {
     let trend7d: [Double]
     var error: AccountError? = nil
     var budgets: AccountBudgets = AccountBudgets(dailyUSD: nil, monthlyUSD: nil)
+    /// vendor-side ``api_key_id`` strings the operator has discarded from
+    /// tracking. The keys are still polled (vendor data is untouched);
+    /// the UI just filters them out of the breakdown and excludes their
+    /// spend from displayed totals.
+    var mutedKeyIDs: Set<String> = []
+
+    /// Visible keys for ``yesterday`` (drops anything in mutedKeyIDs).
+    var visibleKeys: [AccountKeyEntry] {
+        guard !mutedKeyIDs.isEmpty else { return yesterday.keys }
+        return yesterday.keys.filter { !mutedKeyIDs.contains($0.id) }
+    }
+
+    /// Yesterday total minus the sum of muted keys' spend on yesterday.
+    /// This is what the UI should display anywhere it would otherwise
+    /// show ``yesterday.usd``.
+    var displayedYesterdayUSD: Double {
+        guard !mutedKeyIDs.isEmpty else { return yesterday.usd }
+        let mutedSum = yesterday.keys
+            .filter { mutedKeyIDs.contains($0.id) }
+            .reduce(0.0) { $0 + $1.usd }
+        return max(0, yesterday.usd - mutedSum)
+    }
 
     static func == (lhs: AccountState, rhs: AccountState) -> Bool { lhs.id == rhs.id }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -408,6 +430,10 @@ final class SpendingStore: ObservableObject {
                         monthlyUSD: b["monthly_usd"] as? Double
                     )
                 }()
+                let muted: Set<String> = {
+                    guard let arr = info["muted_keys"] as? [String] else { return [] }
+                    return Set(arr)
+                }()
                 return AccountState(
                     id: id,
                     label: label,
@@ -415,7 +441,8 @@ final class SpendingStore: ObservableObject {
                     yesterday: AccountYesterday(date: yDate, usd: yUSD, workspaces: workspaces, keys: keys),
                     trend7d: trend,
                     error: errorsByAccount[id],
-                    budgets: budgets
+                    budgets: budgets,
+                    mutedKeyIDs: muted
                 )
             }
             .sorted { $0.yesterday.usd > $1.yesterday.usd }
@@ -636,6 +663,13 @@ final class SpendingStore: ObservableObject {
         return parts.isEmpty ? nil : parts.reduce(0, +)
     }
 
+    /// Sum of each account's yesterday total minus its muted keys.
+    /// Used by the Overview hero so the headline number respects the
+    /// operator's per-key discards.
+    var displayedTotalsYesterdayUSD: Double {
+        state.accounts.reduce(0.0) { $0 + $1.displayedYesterdayUSD }
+    }
+
     /// {date_iso → total_usd} across all accounts, last 90 days. Used by
     /// the History tier heatmap. Stable order isn't required — the view
     /// indexes by date.
@@ -746,6 +780,34 @@ os.replace(tmp.name, state_file)
         }
         if !enabled, case .key(let aid, _) = nav, aid == accountID {
             popToOverview()
+        }
+        reload()
+    }
+
+    /// Mute or unmute a single api_key_id within an account by shelling
+    /// out to `python3 -m registry mute|unmute <id> <api_key_id>`. After
+    /// the CLI returns, force a reload so the popover updates without
+    /// waiting for the next 5s poll. Symmetric to ``setAccountEnabled``.
+    func setKeyMuted(_ accountID: String, _ apiKeyID: String, muted: Bool) {
+        let action = muted ? "mute" : "unmute"
+        let projectRoot = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .path
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        task.arguments = ["-m", "registry", action, accountID, apiKeyID]
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONPATH"] = projectRoot
+        task.environment = env
+        task.currentDirectoryURL = URL(fileURLWithPath: projectRoot)
+        try? task.run()
+        task.waitUntilExit()
+
+        // If we're sitting on the muted key's KeyDetail page, pop up so
+        // the user isn't left on a now-hidden page.
+        if muted, case .key(let aid, let kid) = nav, aid == accountID, kid == apiKeyID {
+            popToAccount()
         }
         reload()
     }

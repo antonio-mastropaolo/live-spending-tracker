@@ -69,6 +69,11 @@ async def _reconcile_one(entry: RegistryEntry) -> None:
     # registry.json (which holds admin keys).
     if entry.budgets.is_set():
         snapshot_dict["budgets"] = entry.budgets.to_dict()
+    # Same idea for muted keys: include the list so the UI can hide
+    # them and subtract their spend from displayed totals without ever
+    # reading registry.json directly.
+    if entry.muted_keys:
+        snapshot_dict["muted_keys"] = list(entry.muted_keys)
 
     try:
         merge_account_snapshot(entry.id, snapshot_dict)

@@ -67,6 +67,12 @@ class RegistryEntry:
     enabled: bool = True
     # Optional spend caps. ``None`` means no budget configured.
     budgets: Budgets = field(default_factory=Budgets)
+    # Per-key mutes — vendor-side ``api_key_id`` strings the operator no
+    # longer wants surfaced. Polling continues for the account, but these
+    # keys are subtracted from the displayed total and hidden from the
+    # by_key breakdown. Different from ``enabled=False`` (which kills
+    # polling for the whole account).
+    muted_keys: tuple[str, ...] = field(default_factory=tuple)
 
 
 class RegistryError(Exception):
@@ -147,6 +153,20 @@ def _validate_entry(item: object, *, position: int) -> RegistryEntry:
     if not isinstance(enabled_raw, bool):
         raise ValueError("enabled must be a boolean if provided")
     budgets = _parse_budgets(item.get("budgets"))
+    muted_raw = item.get("muted_keys", [])
+    if muted_raw is None:
+        muted = ()
+    elif isinstance(muted_raw, list) and all(isinstance(k, str) for k in muted_raw):
+        # Dedupe + drop empty strings; preserve order for stable diffs.
+        seen: set[str] = set()
+        muted_list: list[str] = []
+        for k in muted_raw:
+            if k and k not in seen:
+                seen.add(k)
+                muted_list.append(k)
+        muted = tuple(muted_list)
+    else:
+        raise ValueError("muted_keys must be a list of strings if provided")
     return RegistryEntry(
         id=item["id"],
         label=item["label"],
@@ -155,6 +175,7 @@ def _validate_entry(item: object, *, position: int) -> RegistryEntry:
         groupings=groupings,
         enabled=enabled_raw,
         budgets=budgets,
+        muted_keys=muted,
     )
 
 
@@ -194,6 +215,8 @@ def save(entries: list[RegistryEntry]) -> None:
         }
         if e.budgets.is_set():
             item["budgets"] = e.budgets.to_dict()
+        if e.muted_keys:
+            item["muted_keys"] = list(e.muted_keys)
         payload.append(item)
     # Write to a temp file then chmod + rename so the file never exists
     # at default umask perms even briefly.
@@ -248,6 +271,55 @@ def set_budget(entry_id: str, budgets: Budgets) -> bool:
                 id=e.id, label=e.label, provider=e.provider,
                 admin_key=e.admin_key, groupings=e.groupings,
                 enabled=e.enabled, budgets=budgets,
+                muted_keys=e.muted_keys,
+            ))
+            found = True
+        else:
+            new_entries.append(e)
+    if found:
+        save(new_entries)
+    return found
+
+
+def mute_key(entry_id: str, api_key_id: str) -> bool:
+    """Add ``api_key_id`` to the entry's muted set. Returns True on
+    success, False if the entry isn't found. No-op if already muted."""
+    entries = load()
+    found = False
+    new_entries: list[RegistryEntry] = []
+    for e in entries:
+        if e.id == entry_id:
+            keys = list(e.muted_keys)
+            if api_key_id not in keys:
+                keys.append(api_key_id)
+            new_entries.append(RegistryEntry(
+                id=e.id, label=e.label, provider=e.provider,
+                admin_key=e.admin_key, groupings=e.groupings,
+                enabled=e.enabled, budgets=e.budgets,
+                muted_keys=tuple(keys),
+            ))
+            found = True
+        else:
+            new_entries.append(e)
+    if found:
+        save(new_entries)
+    return found
+
+
+def unmute_key(entry_id: str, api_key_id: str) -> bool:
+    """Remove ``api_key_id`` from the entry's muted set. Returns True on
+    success, False if the entry isn't found. No-op if not currently muted."""
+    entries = load()
+    found = False
+    new_entries: list[RegistryEntry] = []
+    for e in entries:
+        if e.id == entry_id:
+            keys = [k for k in e.muted_keys if k != api_key_id]
+            new_entries.append(RegistryEntry(
+                id=e.id, label=e.label, provider=e.provider,
+                admin_key=e.admin_key, groupings=e.groupings,
+                enabled=e.enabled, budgets=e.budgets,
+                muted_keys=tuple(keys),
             ))
             found = True
         else:
@@ -269,7 +341,7 @@ def set_enabled(entry_id: str, enabled: bool) -> bool:
             new_entries.append(RegistryEntry(
                 id=e.id, label=e.label, provider=e.provider,
                 admin_key=e.admin_key, groupings=e.groupings, enabled=enabled,
-                budgets=e.budgets,
+                budgets=e.budgets, muted_keys=e.muted_keys,
             ))
             found = True
         else:

@@ -298,7 +298,7 @@ private struct OverviewView: View {
     private var v2Body: some View {
         Button(action: toggleHero) {
             TotalCard(
-                usd: store.state.totalsYesterdayUSD,
+                usd: store.displayedTotalsYesterdayUSD,
                 headline: "YESTERDAY · ALL ACCOUNTS",
                 forecast: store.forecastTotalEndOfMonth,
                 expanded: heroExpanded
@@ -307,7 +307,7 @@ private struct OverviewView: View {
         .buttonStyle(.plain)
 
         if heroExpanded {
-            HeroDetailV2(usd: store.state.totalsYesterdayUSD)
+            HeroDetailV2(usd: store.displayedTotalsYesterdayUSD)
                 .transition(.asymmetric(
                     insertion: .scale(scale: 0.92, anchor: .top)
                         .combined(with: .opacity)
@@ -323,7 +323,7 @@ private struct OverviewView: View {
         if !store.state.accounts.isEmpty {
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(store.state.accounts) { acct in
-                    AccountRow(account: acct, total: store.state.totalsYesterdayUSD)
+                    AccountRow(account: acct, total: store.displayedTotalsYesterdayUSD)
                 }
             }
         } else {
@@ -405,17 +405,21 @@ private struct AccountDetailView: View {
                     BreakdownHeader(text: workspacesHeader(provider: acct.provider))
                     VStack(alignment: .leading, spacing: 1) {
                         ForEach(acct.yesterday.workspaces) { ws in
-                            WorkspaceRow(entry: ws, total: acct.yesterday.usd, color: providerColor(acct.provider))
+                            WorkspaceRow(entry: ws, total: acct.displayedYesterdayUSD, color: providerColor(acct.provider))
                         }
                     }
                 }
-                if !acct.yesterday.keys.isEmpty {
+                let visibleKeys = acct.visibleKeys
+                if !visibleKeys.isEmpty {
                     BreakdownHeader(text: "BY KEY")
                     VStack(alignment: .leading, spacing: 1) {
-                        ForEach(acct.yesterday.keys) { k in
+                        ForEach(visibleKeys) { k in
                             AccountKeyRow(account: acct, key: k, color: providerColor(acct.provider))
                         }
                     }
+                }
+                if !acct.mutedKeyIDs.isEmpty {
+                    MutedKeysSection(account: acct)
                 }
             } else {
                 Text("Account not found.")
@@ -652,7 +656,7 @@ private struct AccountTotalCard: View {
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .tracking(1.4)
                     .foregroundStyle(.tertiary)
-                Text(account.yesterday.usd, format: .currency(code: "USD"))
+                Text(account.displayedYesterdayUSD, format: .currency(code: "USD"))
                     .font(.system(size: 32, weight: .bold, design: .monospaced))
                     .monospacedDigit()
                     .foregroundStyle(tone)
@@ -721,7 +725,7 @@ private struct AccountRow: View {
 
     var body: some View {
         let color = providerColor(account.provider)
-        let usd = account.yesterday.usd
+        let usd = account.displayedYesterdayUSD
         let fraction: Double = total > 0 ? min(usd / total, 1.0) : 0
         let pct = total > 0 ? Int((usd / total * 100).rounded()) : 0
         let wow = store.weekOverWeek(for: account.id)
@@ -872,54 +876,80 @@ private struct AccountKeyRow: View {
     let key: AccountKeyEntry
     let color: Color
     @EnvironmentObject private var store: SpendingStore
+    @State private var hovered = false
 
     var body: some View {
-        let total = account.yesterday.usd
+        let total = account.displayedYesterdayUSD
         let fraction: Double = total > 0 ? min(key.usd / total, 1.0) : 0
         let display: String = {
             if !key.tail.isEmpty { return "…\(key.tail)" }
             return "…\(key.id.suffix(6))"
         }()
 
-        return Button(action: { store.showKey(account.id, key.id) }) {
-            HStack(spacing: 8) {
-                Text(display)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(1)
-                if !key.label.isEmpty {
-                    Text(key.label)
-                        .font(.system(size: 10, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.45))
+        return ZStack {
+            // Whole-row drill button.
+            Button(action: { store.showKey(account.id, key.id) }) {
+                HStack(spacing: 8) {
+                    Text(display)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1)
-                }
-                Spacer(minLength: 6)
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Rectangle().fill(Color.white.opacity(0.06)).frame(height: 4)
-                        Rectangle().fill(color.opacity(0.85))
-                            .frame(width: geo.size.width * fraction, height: 4)
+                    if !key.label.isEmpty {
+                        Text(key.label)
+                            .font(.system(size: 10, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .lineLimit(1)
                     }
-                    .frame(maxHeight: .infinity, alignment: .center)
+                    Spacer(minLength: 6)
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 4)
+                            Rectangle().fill(color.opacity(0.85))
+                                .frame(width: geo.size.width * fraction, height: 4)
+                        }
+                        .frame(maxHeight: .infinity, alignment: .center)
+                    }
+                    .frame(maxWidth: 90, maxHeight: .infinity)
+                    .frame(height: 4)
+                    Text(key.usd, format: .currency(code: "USD"))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .monospacedDigit()
+                        .frame(width: 62, alignment: .trailing)
+                    // Reserve room for the mute button so the chevron
+                    // doesn't shift on hover.
+                    Color.clear.frame(width: 18, height: 1)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.35))
                 }
-                .frame(maxWidth: 90, maxHeight: .infinity)
-                .frame(height: 4)
-                Text(key.usd, format: .currency(code: "USD"))
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .monospacedDigit()
-                    .frame(width: 62, alignment: .trailing)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.35))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Palette.rowFill)
+                .overlay(Rectangle().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Palette.rowFill)
-            .overlay(Rectangle().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
+            .buttonStyle(.plain)
+            .help("Drill into key \(display)")
+
+            // Hover-revealed mute button, sitting on top of the reserved
+            // gap to the left of the chevron. ZStack layering keeps the
+            // surrounding row click target intact.
+            HStack {
+                Spacer()
+                Button(action: { store.setKeyMuted(account.id, key.id, muted: true) }) {
+                    Image(systemName: "eye.slash")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(hovered ? Palette.amber : .white.opacity(0.35))
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Discard \(display) from tracking — admin key kept; reversible via CLI.")
+                .padding(.trailing, 26) // reserve space for the chevron
+                .opacity(hovered ? 1 : 0.55)
+            }
         }
-        .buttonStyle(.plain)
-        .help("Drill into key \(display)")
+        .onHover { hovered = $0 }
     }
 }
 
@@ -1517,7 +1547,9 @@ private struct HeroDetailV2: View {
             for ws in acct.yesterday.workspaces {
                 wsAgg.append((ws.label, ws.usd, acct.provider))
             }
-            for k in acct.yesterday.keys {
+            // Hide muted keys from the cross-account TOP KEYS list so the
+            // hero detail respects the operator's discards.
+            for k in acct.visibleKeys {
                 keyAgg.append((k.label, k.tail, k.usd, acct.provider))
             }
         }
@@ -1806,6 +1838,102 @@ private struct HistoryLinkButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
+    }
+}
+
+// MARK: - Muted keys section (Account Detail)
+//
+// Shown only when the account has at least one muted api_key_id. Lists
+// each muted key with an "unmute" button so the operator can restore
+// any discarded key without dropping to the CLI.
+
+private struct MutedKeysSection: View {
+    let account: AccountState
+    @State private var expanded = false
+    @EnvironmentObject private var store: SpendingStore
+
+    var body: some View {
+        let muted = account.yesterday.keys.filter { account.mutedKeyIDs.contains($0.id) }
+        // We may have muted keys whose api_key_id isn't in the latest
+        // yesterday.by_key (e.g., the key didn't get any spend yesterday
+        // so the vendor didn't return a row for it). Surface those too,
+        // with synthetic minimal info so the operator can still restore.
+        let known: Set<String> = Set(muted.map(\.id))
+        let extras: [AccountKeyEntry] = account.mutedKeyIDs
+            .subtracting(known)
+            .map { AccountKeyEntry(id: $0, label: "", tail: String($0.suffix(4)), usd: 0) }
+        let allMuted = muted + extras
+
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: { expanded.toggle() }) {
+                HStack(spacing: 6) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("MUTED KEYS · \(allMuted.count)")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(1.0)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.white.opacity(0.45))
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                VStack(spacing: 1) {
+                    ForEach(allMuted) { k in
+                        MutedKeyRow(account: account, key: k)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+}
+
+private struct MutedKeyRow: View {
+    let account: AccountState
+    let key: AccountKeyEntry
+    @EnvironmentObject private var store: SpendingStore
+    @State private var hovered = false
+
+    var body: some View {
+        let display = key.tail.isEmpty ? "…\(key.id.suffix(6))" : "…\(key.tail)"
+        return HStack(spacing: 8) {
+            Image(systemName: "eye.slash.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.35))
+            Text(display)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.55))
+            if !key.label.isEmpty {
+                Text(key.label)
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.30))
+            }
+            Spacer()
+            Button(action: { store.setKeyMuted(account.id, key.id, muted: false) }) {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.uturn.left")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("RESTORE")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(0.6)
+                }
+                .foregroundStyle(hovered ? Palette.neon : .white.opacity(0.55))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(hovered ? Palette.neon.opacity(0.10) : Color.white.opacity(0.04))
+                )
+            }
+            .buttonStyle(.plain)
+            .onHover { hovered = $0 }
+            .help("Restore \(display) — its spend will start counting again.")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Palette.rowFill)
     }
 }
 

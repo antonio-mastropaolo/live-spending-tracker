@@ -25,10 +25,12 @@ from registry.loader import (
     SUPPORTED_PROVIDERS,
     load,
     load_global_budgets,
+    mute_key,
     save,
     save_global_budgets,
     set_budget,
     set_enabled,
+    unmute_key,
 )
 
 
@@ -208,6 +210,26 @@ def cmd_budget(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_mute(args: argparse.Namespace) -> int:
+    """`python3 -m registry mute <account_id> <api_key_id>` — hide a key
+    from the breakdown and exclude its spend from displayed totals.
+    Polling continues; the underlying vendor data is untouched.
+    """
+    if not mute_key(args.id, args.api_key_id):
+        print(f"no entry with id {args.id!r}", file=sys.stderr)
+        return 1
+    print(f"muted key {args.api_key_id!r} on account {args.id!r}.")
+    return 0
+
+
+def cmd_unmute(args: argparse.Namespace) -> int:
+    if not unmute_key(args.id, args.api_key_id):
+        print(f"no entry with id {args.id!r}", file=sys.stderr)
+        return 1
+    print(f"unmuted key {args.api_key_id!r} on account {args.id!r}.")
+    return 0
+
+
 def cmd_validate(_args: argparse.Namespace) -> int:
     entries = load()
     print(f"{REGISTRY_FILE}: {len(entries)} valid entry/entries.")
@@ -234,6 +256,12 @@ def main(argv: list[str] | None = None) -> int:
     p_disable.add_argument("id")
     p_enable = sub.add_parser("enable", help="resume polling for a disabled account")
     p_enable.add_argument("id")
+    p_mute = sub.add_parser("mute", help="hide a single api_key_id from the breakdown + totals")
+    p_mute.add_argument("id")
+    p_mute.add_argument("api_key_id")
+    p_unmute = sub.add_parser("unmute", help="restore a previously muted api_key_id")
+    p_unmute.add_argument("id")
+    p_unmute.add_argument("api_key_id")
     sub.add_parser("validate", help="lint the registry; warn on bad key prefixes")
 
     p_budget = sub.add_parser("budget", help="set, clear, or configure global spend caps")
@@ -259,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
         "remove":   cmd_remove,
         "disable":  cmd_disable,
         "enable":   cmd_enable,
+        "mute":     cmd_mute,
+        "unmute":   cmd_unmute,
         "validate": cmd_validate,
         "budget":   cmd_budget,
     }[args.cmd](args)
