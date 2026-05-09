@@ -539,9 +539,11 @@ private struct TotalCard: View {
     var expanded: Bool = false
 
     var heroColor: Color {
-        if usd > 25 { return Palette.danger }
-        if usd > 5  { return Palette.amber }
-        return Palette.neon
+        // Amber by default — the warm "money on the move" tone. Escalates
+        // only at clearly worrying levels so the visual stays grounded
+        // for normal-day spend.
+        if usd > 50 { return Palette.danger }
+        return Palette.amber
     }
 
     var body: some View {
