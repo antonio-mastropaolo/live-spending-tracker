@@ -109,10 +109,31 @@ private struct QuitButton: View {
 struct MenuBarView: View {
     @EnvironmentObject private var store: SpendingStore
     @State private var headerAppeared = false
+    @State private var selectedProvider: String? = nil
 
     private var state: SpendingState { store.state }
 
     var body: some View {
+        ZStack {
+            if let provider = selectedProvider {
+                providerDetail(for: provider)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .trailing).combined(with: .opacity)))
+            } else {
+                overview
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)))
+            }
+        }
+        .frame(width: 380)
+        .background(Color(white: 0.06))
+        .preferredColorScheme(.dark)
+        .animation(.easeInOut(duration: 0.22), value: selectedProvider)
+    }
+
+    private var overview: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
             totalCard
@@ -126,9 +147,6 @@ struct MenuBarView: View {
             footerButtons
         }
         .padding(16)
-        .frame(width: 380)
-        .background(Color(white: 0.06))
-        .preferredColorScheme(.dark)
     }
 
     // MARK: – Header
@@ -311,46 +329,67 @@ struct MenuBarView: View {
         let color = providerColor(name)
         let fraction: Double = total > 0 ? min(usd / total, 1.0) : 0
         let pct = total > 0 ? Int((usd / total * 100).rounded()) : 0
+        let driftEntry = state.drift.first { $0.provider == name }
+        let isDrift = driftEntry?.state == "DRIFT"
 
-        return HStack(alignment: .center, spacing: 0) {
-            color.frame(width: 2).clipShape(Rectangle())
+        return Button(action: { selectedProvider = name }) {
+            HStack(alignment: .center, spacing: 0) {
+                color.frame(width: 2).clipShape(Rectangle())
 
-            HStack(alignment: .center, spacing: 8) {
-                HStack(spacing: 6) {
-                    Circle().fill(color).frame(width: 5, height: 5)
-                    Text(name.capitalized)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.82))
-                        .lineLimit(1)
-                }
-                .frame(width: 82, alignment: .leading)
-
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Rectangle().fill(Color.white.opacity(0.06)).frame(height: 4)
-                        Rectangle().fill(color.opacity(0.85))
-                            .frame(width: geo.size.width * fraction, height: 4)
+                HStack(alignment: .center, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Circle().fill(color).frame(width: 5, height: 5)
+                        Text(name.capitalized)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(Color.white.opacity(0.82))
+                            .lineLimit(1)
+                        if isDrift {
+                            Text("DRIFT")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .tracking(0.6)
+                                .foregroundStyle(Color(red: 1.0, green: 0.27, blue: 0.23))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(Color(red: 1.0, green: 0.27, blue: 0.23).opacity(0.15)))
+                        }
                     }
-                    .frame(maxHeight: .infinity, alignment: .center)
+                    .frame(width: 110, alignment: .leading)
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 4)
+                            Rectangle().fill(color.opacity(0.85))
+                                .frame(width: geo.size.width * fraction, height: 4)
+                        }
+                        .frame(maxHeight: .infinity, alignment: .center)
+                    }
+                    .frame(height: 4)
+
+                    Text(usd, format: .currency(code: "USD"))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.75))
+                        .monospacedDigit()
+                        .frame(width: 62, alignment: .trailing)
+
+                    Text("\(pct)%")
+                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.28))
+                        .frame(width: 26, alignment: .trailing)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.35))
                 }
-                .frame(height: 4)
-
-                Text(usd, format: .currency(code: "USD"))
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.75))
-                    .monospacedDigit()
-                    .frame(width: 62, alignment: .trailing)
-
-                Text("\(pct)%")
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.28))
-                    .frame(width: 30, alignment: .trailing)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color(white: 0.10))
+                .overlay(Rectangle().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color(white: 0.10))
-            .overlay(Rectangle().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
         }
+        .buttonStyle(.plain)
+        .help("Tap to drill into \(name.capitalized)")
     }
 
     private func providerIcon(_ name: String) -> some View {
@@ -545,6 +584,243 @@ struct MenuBarView: View {
             Text(ts, style: .relative)
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: – Provider detail
+
+    private func providerDetail(for provider: String) -> some View {
+        let providerUSD = state.byProvider.first { $0.provider == provider }?.usd ?? 0
+        let tone = providerColor(provider)
+        let modelsForProvider = state.byModel.filter { row in
+            // Heuristic: model id is grouped under provider via prefix in pricing.json.
+            // For tagging here we just show all models with non-zero spend; accuracy
+            // improves once the proxy starts attaching provider tags to model rows.
+            modelMatchesProvider(model: row.model, provider: provider)
+        }
+        let keysForProvider = state.byKey.filter { $0.provider == provider }
+        let truth = state.vendorTruth(for: provider)
+        let driftEntry = state.drift.first { $0.provider == provider }
+
+        return VStack(alignment: .leading, spacing: 12) {
+            providerDetailHeader(provider: provider, color: tone)
+
+            providerDetailTotalCard(provider: provider, usd: providerUSD, color: tone)
+
+            if let truth = truth {
+                vendorTruthCard(provider: provider, truth: truth, drift: driftEntry, color: tone)
+            }
+
+            if !modelsForProvider.isEmpty {
+                modelBreakdown(rows: modelsForProvider, providerTotal: providerUSD, color: tone)
+            }
+            if !keysForProvider.isEmpty {
+                keyBreakdownScoped(rows: keysForProvider, providerTotal: providerUSD, color: tone)
+            }
+
+            proxyStatus
+            footerButtons
+        }
+        .padding(16)
+    }
+
+    private func providerDetailHeader(provider: String, color: Color) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Button(action: { selectedProvider = nil }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("BACK")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .tracking(0.8)
+                }
+                .foregroundStyle(Color.white.opacity(0.7))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(white: 0.12))
+                        .overlay(RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5)))
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(provider.capitalized)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+        }
+        .padding(.bottom, 4)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
+        }
+    }
+
+    private func providerDetailTotalCard(provider: String, usd: Double, color: Color) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(white: 0.12))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5))
+            GeometryReader { geo in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(color.opacity(0.85))
+                    .frame(width: 2, height: geo.size.height * 0.56)
+                    .frame(maxHeight: .infinity, alignment: .center)
+            }
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("TODAY · \(provider.uppercased())")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .tracking(1.4)
+                        .foregroundStyle(.tertiary)
+                    Text(usd, format: .currency(code: "USD"))
+                        .font(.system(size: 32, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(color)
+                        .shadow(color: color.opacity(0.4), radius: 6, x: 0, y: 2)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 12)
+            .padding(.leading, 18)
+            .padding(.trailing, 14)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func vendorTruthCard(provider: String, truth: VendorTruth, drift: DriftEntry?, color: Color) -> some View {
+        let isDrift = drift?.state == "DRIFT"
+        let accent: Color = isDrift ? Color(red: 1.0, green: 0.27, blue: 0.23) : Color.white.opacity(0.5)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: isDrift ? "exclamationmark.triangle.fill" : "checkmark.seal")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(accent)
+                Text(isDrift ? "VENDOR DRIFT" : "VENDOR TRUTH")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(1.0)
+                    .foregroundStyle(accent)
+                Spacer()
+                if let d = drift, d.deltaPct > 0 {
+                    Text(String(format: "%.1f%%", d.deltaPct))
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(accent)
+                }
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("YESTERDAY · VENDOR")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .tracking(0.7)
+                        .foregroundStyle(.quaternary)
+                    Text(truth.usd, format: .currency(code: "USD"))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.white.opacity(0.85))
+                }
+                if let d = drift {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("YESTERDAY · PROXY")
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .tracking(0.7)
+                            .foregroundStyle(.quaternary)
+                        Text(d.proxyUSD, format: .currency(code: "USD"))
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.white.opacity(0.65))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isDrift ? Color(red: 1.0, green: 0.27, blue: 0.23).opacity(0.06) : Color(white: 0.10))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isDrift ? Color(red: 1.0, green: 0.27, blue: 0.23).opacity(0.35)
+                                          : Color.white.opacity(0.06), lineWidth: 0.5))
+        )
+    }
+
+    private func modelBreakdown(rows: [(model: String, usd: Double)], providerTotal: Double, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("BY MODEL")
+                .font(.system(size: 9, weight: .ultraLight, design: .monospaced))
+                .tracking(2.5)
+                .foregroundStyle(Color.white.opacity(0.3))
+                .padding(.horizontal, 2)
+                .padding(.bottom, 6)
+            VStack(spacing: 1) {
+                ForEach(rows, id: \.model) { row in
+                    miniRow(label: row.model, usd: row.usd, total: providerTotal, color: color, mono: true)
+                }
+            }
+        }
+    }
+
+    private func keyBreakdownScoped(rows: [KeyEntry], providerTotal: Double, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("BY KEY")
+                .font(.system(size: 9, weight: .ultraLight, design: .monospaced))
+                .tracking(2.5)
+                .foregroundStyle(Color.white.opacity(0.3))
+                .padding(.horizontal, 2)
+                .padding(.bottom, 6)
+            VStack(spacing: 1) {
+                ForEach(rows) { entry in
+                    let label = entry.tail.isEmpty ? "…\(entry.id.prefix(6))" : "…\(entry.tail)"
+                    miniRow(label: label, usd: entry.usd, total: providerTotal, color: color, mono: true)
+                }
+            }
+        }
+    }
+
+    private func miniRow(label: String, usd: Double, total: Double, color: Color, mono: Bool) -> some View {
+        let fraction: Double = total > 0 ? min(usd / total, 1.0) : 0
+        return HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium, design: mono ? .monospaced : .rounded))
+                .foregroundStyle(Color.white.opacity(0.78))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 140, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.white.opacity(0.06)).frame(height: 4)
+                    Rectangle().fill(color.opacity(0.85))
+                        .frame(width: geo.size.width * fraction, height: 4)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+            .frame(height: 4)
+            Text(usd, format: .currency(code: "USD"))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.72))
+                .monospacedDigit()
+                .frame(width: 62, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(white: 0.10))
+        .overlay(Rectangle().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
+    }
+
+    private func modelMatchesProvider(model: String, provider: String) -> Bool {
+        let m = model.lowercased()
+        switch provider.lowercased() {
+        case "anthropic":   return m.contains("claude")
+        case "openai":      return m.hasPrefix("gpt") || m.hasPrefix("o1") || m.hasPrefix("o3") || m.hasPrefix("o4")
+        case "gemini":      return m.contains("gemini")
+        case "mistral":     return m.contains("mistral") || m.contains("mixtral") || m.contains("codestral")
+        case "cohere":      return m.contains("command") || m.contains("cohere")
+        case "huggingface": return m.contains("/") || m.contains("deepseek")
+        default:            return false
         }
     }
 

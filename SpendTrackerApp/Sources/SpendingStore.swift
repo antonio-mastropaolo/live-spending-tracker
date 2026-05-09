@@ -17,6 +17,13 @@ struct DriftEntry: Identifiable {
     let deltaPct: Double
 }
 
+struct VendorTruth {
+    let provider: String
+    let usd: Double
+    let fetchedAt: Date?
+    let covers: String       // e.g. "yesterday_utc"
+}
+
 struct SpendingState {
     var totalUSD: Double = 0
     var byProvider: [(provider: String, usd: Double)] = []
@@ -24,6 +31,11 @@ struct SpendingState {
     var byKey: [KeyEntry] = []
     var drift: [DriftEntry] = []
     var anyDrift: Bool = false
+    var vendorTruthByProvider: [String: VendorTruth] = [:]
+
+    func vendorTruth(for provider: String) -> VendorTruth? {
+        vendorTruthByProvider[provider]
+    }
     var date: String = ""
     var lastUpdated: Date? = nil
     var lastReconciled: Date? = nil
@@ -87,6 +99,21 @@ final class SpendingStore: ObservableObject {
                 return KeyEntry(id: fp, tail: tail, provider: provider, usd: usd)
             }
             .sorted { $0.usd > $1.usd }
+        }
+        if let vt = json["vendor_truth"] as? [String: [String: Any]] {
+            var map: [String: VendorTruth] = [:]
+            let fmt = ISO8601DateFormatter()
+            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            for (provider, info) in vt {
+                let usd = (info["usd"] as? Double) ?? 0
+                let covers = (info["covers"] as? String) ?? ""
+                var fetched: Date? = nil
+                if let ts = info["fetched_at"] as? String {
+                    fetched = fmt.date(from: ts) ?? ISO8601DateFormatter().date(from: ts)
+                }
+                map[provider] = VendorTruth(provider: provider, usd: usd, fetchedAt: fetched, covers: covers)
+            }
+            s.vendorTruthByProvider = map
         }
         if let drift = json["drift"] as? [String: [String: Any]] {
             s.drift = drift.compactMap { (provider, info) -> DriftEntry? in
