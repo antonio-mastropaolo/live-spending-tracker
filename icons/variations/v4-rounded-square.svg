@@ -1,0 +1,40 @@
+<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="v4bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a1a"/>
+      <stop offset="100%" stop-color="#080808"/>
+    </linearGradient>
+    <linearGradient id="v4dollar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <filter id="v4glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#v4bg)" stroke="#22c55e" stroke-width="2" stroke-opacity="0.4"/>
+  <!-- Inner shield -->
+  <path d="M64 22 L96 32 L96 64 C96 82, 82 96, 64 104 C46 96, 32 82, 32 64 L32 32 Z"
+        fill="#0a0a0a" stroke="#22c55e" stroke-width="1.5" stroke-opacity="0.6"/>
+  <!-- Circuit traces -->
+  <g filter="url(#v4glow)" stroke="#22c55e" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-opacity="0.8">
+    <path d="M14 64 L28 64"/>
+    <path d="M14 80 L24 80 L28 76"/>
+  </g>
+  <g filter="url(#v4glow)" stroke="#06b6d4" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-opacity="0.8">
+    <path d="M100 50 L114 50"/>
+    <path d="M100 64 L114 64"/>
+  </g>
+  <!-- Dollar sign -->
+  <g filter="url(#v4glow)" stroke="url(#v4dollar)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M76 50 C76 44, 70 40, 64 40 C58 40, 52 44, 52 50 C52 56, 58 58, 64 60 C70 62, 76 64, 76 70 C76 76, 70 80, 64 80 C58 80, 52 76, 52 70"/>
+    <line x1="64" y1="34" x2="64" y2="40"/>
+    <line x1="64" y1="80" x2="64" y2="86"/>
+  </g>
+  <!-- Trending arrow -->
+  <g filter="url(#v4glow)" stroke="#22c55e" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.85">
+    <polyline points="44,90 56,82 64,86 80,74"/>
+    <polyline points="74,74 80,74 80,80"/>
+  </g>
+</svg>

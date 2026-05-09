@@ -39,11 +39,20 @@ def _prompt(label: str, *, default: str | None = None) -> str:
 
 
 def _validate_admin_key(provider: str, key: str) -> tuple[bool, str]:
-    """Return (ok, reason). DESIGN.md §4c — the bad-prefix class of bug."""
+    """Return (ok, reason). DESIGN.md §4c — the bad-prefix class of bug.
+
+    Anthropic admin keys ship as `sk-ant-admin01-…` / `sk-ant-admin02-…`
+    in practice (the digits encode the key format version). Older docs
+    referenced `sk-ant-admin-…` — both shapes are valid; the invariant
+    is that the prefix contains the literal token `sk-ant-admin`. The
+    earlier exact-match check was the source of legitimate keys being
+    rejected at install time.
+    """
     if provider == "anthropic":
-        if not key.startswith("sk-ant-admin-"):
-            return False, ("anthropic admin keys start with 'sk-ant-admin-'. "
-                           "Regular sk-ant-… keys cannot read /v1/organizations/cost_report.")
+        if not key.startswith("sk-ant-admin"):
+            return False, ("anthropic admin keys start with 'sk-ant-admin' "
+                           "(e.g. 'sk-ant-admin01-…'). Regular sk-ant-… keys "
+                           "cannot read /v1/organizations/cost_report.")
     elif provider == "openai":
         if key.startswith("sk-proj-") or key.startswith("sk-svcacct-"):
             return False, ("OpenAI project/service-account keys are rejected by "

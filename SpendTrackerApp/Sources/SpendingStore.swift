@@ -134,6 +134,24 @@ enum NavTier: Equatable {
     case history
 }
 
+/// One day's rich rollup as decoded from history.json. Mirrors the Python
+/// shape `{usd, by_workspace, by_key}` (legacy float entries are upgraded
+/// when read).
+struct DayHistory: Hashable {
+    let usd: Double
+    let workspaces: [WorkspaceEntry]
+    let keys: [AccountKeyEntry]
+}
+
+/// One row in the day-detail card's aggregated workspace / key breakdown.
+struct DayBreakdownEntry: Identifiable, Hashable {
+    let id: String       // ws_id or api_key_id
+    let label: String
+    let tail: String     // empty for workspaces
+    let provider: String // for color coding
+    let usd: Double
+}
+
 // MARK: - SpendingStore
 
 @MainActor
@@ -142,16 +160,34 @@ final class SpendingStore: ObservableObject {
     @Published var proxyRunning = false
     @Published var isStale = false
     @Published var nav: NavTier = .overview
-    /// {account_id: {date_iso: usd}}. Loaded lazily and refreshed on each
-    /// reload tick. Empty when ~/.ai-spending/history.json doesn't exist
-    /// (v1-fallback or first-poll-not-yet-fired).
-    @Published var history: [String: [String: Double]] = [:]
+    /// {account_id: {date_iso: DayHistory}}. Loaded lazily and refreshed on
+    /// each reload tick. Empty when ~/.ai-spending/history.json doesn't
+    /// exist (v1-fallback or first-poll-not-yet-fired). Each day carries
+    /// the full workspace + key breakdown so the heatmap detail panel can
+    /// inspect any past day, not just yesterday.
+    @Published var history: [String: [String: DayHistory]] = [:]
 
     private let stateURL = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent(".ai-spending/state.json")
     private let historyURL = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent(".ai-spending/history.json")
+    private let registryURL = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent(".ai-spending/registry.json")
+    /// True when the operator has installed a v2 registry — drives the
+    /// Overview into multi-account mode even before the first successful
+    /// reconcile, so the layout doesn't flip-flop between v1 and v2 as
+    /// the reconciler ramps up.
+    @Published var registryInstalled: Bool = false
     private var timer: Timer?
+
+    /// Set of alert keys we've already shown a toast for. Backed by
+    /// UserDefaults so app restarts don't replay the day's alerts.
+    private static let seenAlertsDefaultsKey = "SpendTracker.seenAlertKeys"
+    private var seenAlertKeys: Set<String> = {
+        let raw = UserDefaults.standard.array(forKey: SpendingStore.seenAlertsDefaultsKey) as? [String] ?? []
+        return Set(raw)
+    }()
+    private var firstReload: Bool = true
 
     init() {
         reload()
@@ -164,9 +200,11 @@ final class SpendingStore: ObservableObject {
         }
     }
 
-    /// Re-read ~/.ai-spending/history.json. Cheap (≤ 1 KB per account at
-    /// 90 days). Called from reload() so heatmap + forecast + WoW always
-    /// reflect what the reconciler last wrote.
+    /// Re-read ~/.ai-spending/history.json. Cheap (≤ ~10 KB per account at
+    /// 90 days even with full breakdowns). Called from reload() so
+    /// heatmap + forecast + WoW always reflect what the reconciler last
+    /// wrote. Tolerates both the rich `{usd, by_workspace, by_key}` shape
+    /// and legacy bare floats (older history.json files).
     private func reloadHistory() {
         guard let data = try? Data(contentsOf: historyURL),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -174,21 +212,61 @@ final class SpendingStore: ObservableObject {
             history = [:]
             return
         }
-        var out: [String: [String: Double]] = [:]
+        var out: [String: [String: DayHistory]] = [:]
         for (aid, days) in json {
             guard let dayMap = days as? [String: Any] else { continue }
-            var clean: [String: Double] = [:]
-            for (d, v) in dayMap {
-                if let usd = v as? Double { clean[d] = usd }
-                else if let n = v as? NSNumber { clean[d] = n.doubleValue }
+            var clean: [String: DayHistory] = [:]
+            for (d, raw) in dayMap {
+                if let entry = decodeDayHistory(raw) {
+                    clean[d] = entry
+                }
             }
             out[aid] = clean
         }
         history = out
     }
 
+    private func decodeDayHistory(_ raw: Any) -> DayHistory? {
+        // Legacy: bare float / number → upgrade to a rich entry with no breakdown.
+        if let usd = raw as? Double {
+            return DayHistory(usd: usd, workspaces: [], keys: [])
+        }
+        if let n = raw as? NSNumber {
+            return DayHistory(usd: n.doubleValue, workspaces: [], keys: [])
+        }
+        guard let dict = raw as? [String: Any] else { return nil }
+        let usd: Double = {
+            if let v = dict["usd"] as? Double { return v }
+            if let n = dict["usd"] as? NSNumber { return n.doubleValue }
+            return 0
+        }()
+        let workspaces: [WorkspaceEntry] = {
+            guard let bw = dict["by_workspace"] as? [String: [String: Any]] else { return [] }
+            return bw.compactMap { (wid, w) -> WorkspaceEntry? in
+                let v: Double = (w["usd"] as? Double) ?? ((w["usd"] as? NSNumber)?.doubleValue ?? 0)
+                let label = (w["label"] as? String) ?? wid
+                return WorkspaceEntry(id: wid, label: label.isEmpty ? wid : label, usd: v)
+            }
+            .sorted { $0.usd > $1.usd }
+        }()
+        let keys: [AccountKeyEntry] = {
+            guard let bk = dict["by_key"] as? [String: [String: Any]] else { return [] }
+            return bk.compactMap { (kid, k) -> AccountKeyEntry? in
+                let v: Double = (k["usd"] as? Double) ?? ((k["usd"] as? NSNumber)?.doubleValue ?? 0)
+                let label = (k["label"] as? String) ?? ""
+                let tail = (k["tail"] as? String) ?? ""
+                return AccountKeyEntry(id: kid, label: label, tail: tail, usd: v)
+            }
+            .sorted { $0.usd > $1.usd }
+        }()
+        return DayHistory(usd: usd, workspaces: workspaces, keys: keys)
+    }
+
     func reload() {
         reloadHistory()
+        // Detect v2 mode by file existence — registry.json holds admin
+        // keys so we never read it directly, just probe its presence.
+        registryInstalled = FileManager.default.fileExists(atPath: registryURL.path)
 
         guard let data = try? Data(contentsOf: stateURL),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -352,6 +430,25 @@ final class SpendingStore: ObservableObject {
 
         state = s
 
+        // Toast surfacing: pull the alerts_fired dict and find any keys
+        // that aren't in our seen-set. New = enqueue a toast. First reload
+        // after launch, just absorb whatever's there (avoids replaying
+        // earlier-today alerts every time the app boots).
+        if let af = json["alerts_fired"] as? [String: Any] {
+            let allKeys = Set(af.keys)
+            if firstReload {
+                seenAlertKeys.formUnion(allKeys)
+            } else {
+                let newKeys = allKeys.subtracting(seenAlertKeys)
+                for k in newKeys {
+                    enqueueToast(forKey: k)
+                }
+                seenAlertKeys.formUnion(newKeys)
+            }
+            UserDefaults.standard.set(Array(seenAlertKeys), forKey: Self.seenAlertsDefaultsKey)
+        }
+        firstReload = false
+
         // Staleness: in v2 mode, the registry reconciler stamps
         // last_reconciled — that's the freshest live signal. If older than
         // 30 minutes, dim. In v1-only mode keep the legacy date+lastUpdated
@@ -376,6 +473,70 @@ final class SpendingStore: ObservableObject {
             }()
             isStale = dateMismatch || ageStale
         }
+    }
+
+    /// Translate a Python-side alerts_fired key into a Toast and push it
+    /// to the floating panel. Key format (notifier/alerts.py):
+    ///   daily_<account_id>_<YYYY-MM-DD>
+    ///   monthly_<account_id>_<YYYY-MM>
+    ///   daily_GLOBAL_<YYYY-MM-DD>  /  monthly_GLOBAL_<YYYY-MM>
+    ///
+    /// Toasts include the provider id + actual figures so the visual
+    /// layer can render the provider-tinted accent stripe, monogram chip,
+    /// budget overflow bar, and percentage pill.
+    private func enqueueToast(forKey key: String) {
+        let parts = key.split(separator: "_", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return }
+        let kindToken = String(parts[0])
+        let accountID = String(parts[1])
+        let kind: ToastKind = (kindToken == "monthly") ? .budgetMonthly : .budgetDaily
+
+        var label: String
+        var message: String
+        var provider: String? = nil
+        var spent: Double? = nil
+        var cap: Double? = nil
+
+        if accountID == "GLOBAL" {
+            label = "All accounts"
+            // Sum across all accounts for the appropriate window.
+            let agg: Double
+            switch kind {
+            case .budgetMonthly:
+                agg = state.accounts.reduce(0.0) { $0 + monthToDateSpend(for: $1.id) }
+                message = "Cross-account monthly cap exceeded."
+            default:
+                agg = state.accounts.reduce(0.0) { $0 + todaySpend(for: $1.id) }
+                message = "Cross-account daily cap exceeded."
+            }
+            spent = agg
+        } else if let acct = state.accounts.first(where: { $0.id == accountID }) {
+            label = acct.label
+            provider = acct.provider
+            switch kind {
+            case .budgetMonthly:
+                spent = monthToDateSpend(for: accountID)
+                cap = acct.budgets.monthlyUSD
+                message = "Month-to-date over the configured cap."
+            default:
+                spent = todaySpend(for: accountID)
+                cap = acct.budgets.dailyUSD
+                message = "Today's spend already over the daily cap."
+            }
+        } else {
+            label = accountID
+            message = "Budget threshold crossed."
+        }
+
+        let t = Toast(
+            kind: kind,
+            title: label,
+            message: message,
+            provider: provider,
+            spentUSD: spent,
+            capUSD: cap
+        )
+        ToastCenter.shared.enqueue(t)
     }
 
     func checkProxy() {
@@ -417,7 +578,7 @@ final class SpendingStore: ObservableObject {
     func todaySpend(for accountID: String) -> Double {
         guard let bucket = history[accountID] else { return 0 }
         let today = Self.isoDayFmt.string(from: Date())
-        return bucket[today] ?? 0
+        return bucket[today]?.usd ?? 0
     }
 
     func monthToDateSpend(for accountID: String) -> Double {
@@ -426,7 +587,7 @@ final class SpendingStore: ObservableObject {
         return bucket
             .filter { $0.key.hasPrefix(prefix) }
             .values
-            .reduce(0, +)
+            .reduce(0) { $0 + $1.usd }
     }
 
     /// Linear projection: MTD ÷ days-elapsed × days-in-month. Returns nil
@@ -453,8 +614,8 @@ final class SpendingStore: ObservableObject {
         for offset in 1...14 {
             guard let d = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
             let key = Self.isoDayFmt.string(from: d)
-            if let v = bucket[key] {
-                if offset <= 7 { thisWeek += v } else { lastWeek += v }
+            if let entry = bucket[key] {
+                if offset <= 7 { thisWeek += entry.usd } else { lastWeek += entry.usd }
             }
         }
         guard lastWeek > 0 else { return nil }
@@ -474,11 +635,44 @@ final class SpendingStore: ObservableObject {
     func dailyTotalsAcrossAccounts() -> [String: Double] {
         var out: [String: Double] = [:]
         for (_, days) in history {
-            for (d, v) in days {
-                out[d, default: 0] += v
+            for (d, entry) in days {
+                out[d, default: 0] += entry.usd
             }
         }
         return out
+    }
+
+    /// Aggregated workspace + key breakdown across all accounts for a
+    /// single calendar day. Drives the DayDetailCard's fine-grained
+    /// "what was spent on this date" view.
+    func dayBreakdown(_ date: String) -> (
+        workspaces: [DayBreakdownEntry],
+        keys:       [DayBreakdownEntry]
+    ) {
+        var ws: [DayBreakdownEntry] = []
+        var kk: [DayBreakdownEntry] = []
+        for (aid, days) in history {
+            guard let entry = days[date] else { continue }
+            let provider = state.accounts.first { $0.id == aid }?.provider ?? ""
+            for w in entry.workspaces where w.usd > 0 {
+                // Namespace the row id by account so two accounts with the
+                // same workspace_id can't collide in SwiftUI ForEach.
+                ws.append(DayBreakdownEntry(
+                    id: "\(aid):\(w.id)", label: w.label, tail: "",
+                    provider: provider, usd: w.usd
+                ))
+            }
+            for k in entry.keys where k.usd > 0 {
+                kk.append(DayBreakdownEntry(
+                    id: "\(aid):\(k.id)", label: k.label, tail: k.tail,
+                    provider: provider, usd: k.usd
+                ))
+            }
+        }
+        return (
+            workspaces: ws.sorted { $0.usd > $1.usd },
+            keys:       kk.sorted { $0.usd > $1.usd }
+        )
     }
 
     func resetState() {

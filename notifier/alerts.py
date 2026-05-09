@@ -50,19 +50,32 @@ def _month_iso() -> str:
     return date.today().strftime("%Y-%m")
 
 
-def _spend_today(history_for_account: dict[str, float]) -> float:
-    return float(history_for_account.get(_today_iso(), 0.0) or 0.0)
+def _day_usd(entry: object) -> float:
+    """Extract the USD total from a history day entry. Tolerates both the
+    rich shape `{usd, by_workspace, by_key}` and a bare float (legacy)."""
+    if entry is None:
+        return 0.0
+    if isinstance(entry, dict):
+        try:
+            return float(entry.get("usd") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    try:
+        return float(entry)
+    except (TypeError, ValueError):
+        return 0.0
 
 
-def _spend_month_to_date(history_for_account: dict[str, float]) -> float:
+def _spend_today(history_for_account: dict[str, object]) -> float:
+    return _day_usd(history_for_account.get(_today_iso()))
+
+
+def _spend_month_to_date(history_for_account: dict[str, object]) -> float:
     prefix = _month_iso() + "-"
     total = 0.0
     for d, v in history_for_account.items():
         if d.startswith(prefix):
-            try:
-                total += float(v or 0.0)
-            except (TypeError, ValueError):
-                pass
+            total += _day_usd(v)
     return total
 
 

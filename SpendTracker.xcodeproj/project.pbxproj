@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2CA15DDA5EE38F08A410DD98 /* Toasts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D4CEE13381AA77E8A8554E /* Toasts.swift */; };
 		435797D966B35EC3D5BCD03A /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31763DDF5B3BB18733D42A8D /* MenuBarView.swift */; };
 		6BB7073E2D06D368AAC7D07B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5C6CB1B251F6C09ECC6D2DEC /* Assets.xcassets */; };
 		831925FDC99C1398784DEEF3 /* SpendingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EDF6D8204243895E20A2DBC /* SpendingStore.swift */; };
@@ -18,6 +19,7 @@
 		31763DDF5B3BB18733D42A8D /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		5C6CB1B251F6C09ECC6D2DEC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		6EDF6D8204243895E20A2DBC /* SpendingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpendingStore.swift; sourceTree = "<group>"; };
+		A7D4CEE13381AA77E8A8554E /* Toasts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Toasts.swift; sourceTree = "<group>"; };
 		D8C8011B36588B725D15DC36 /* SpendTrackerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpendTrackerApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -44,6 +46,7 @@
 				31763DDF5B3BB18733D42A8D /* MenuBarView.swift */,
 				6EDF6D8204243895E20A2DBC /* SpendingStore.swift */,
 				D8C8011B36588B725D15DC36 /* SpendTrackerApp.swift */,
+				A7D4CEE13381AA77E8A8554E /* Toasts.swift */,
 			);
 			name = Sources;
 			path = SpendTrackerApp/Sources;
@@ -132,6 +135,7 @@
 				435797D966B35EC3D5BCD03A /* MenuBarView.swift in Sources */,
 				9AA1C162171693FFAC383517 /* SpendTrackerApp.swift in Sources */,
 				831925FDC99C1398784DEEF3 /* SpendingStore.swift in Sources */,
+				2CA15DDA5EE38F08A410DD98 /* Toasts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

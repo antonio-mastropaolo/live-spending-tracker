@@ -41,7 +41,9 @@ private enum Palette {
 
 // MARK: - Provider colors
 
-private func providerColor(_ name: String) -> Color {
+// Module-internal (no `private`) so Toasts.swift can use the same color +
+// monogram chip the popover rows render.
+func providerColor(_ name: String) -> Color {
     switch name.lowercased() {
     case "anthropic": return Color(red: 1.0,  green: 0.45, blue: 0.2)
     case "openai":    return Color(red: 0.45, green: 0.85, blue: 0.75)
@@ -49,6 +51,50 @@ private func providerColor(_ name: String) -> Color {
     case "mistral":   return Color(red: 1.0,  green: 0.62, blue: 0.0)
     case "cohere":    return Color(red: 0.6,  green: 0.35, blue: 1.0)
     default:          return Color(white: 0.55)
+    }
+}
+
+/// Single uppercase letter we use as the provider's monogram. Drawn
+/// programmatically inside a rounded chip — no asset catalog, no
+/// trademarked artwork, scales crisp at any size.
+private func providerMonogram(_ name: String) -> String {
+    switch name.lowercased() {
+    case "anthropic":   return "A"
+    case "openai":      return "O"
+    case "gemini":      return "G"
+    case "mistral":     return "M"
+    case "cohere":      return "C"
+    case "huggingface": return "H"
+    default:            return name.first.map { String($0).uppercased() } ?? "?"
+    }
+}
+
+/// A small provider mark — rounded-square chip with an accent stroke and
+/// the provider's bold monogram. Sized for 16–22pt rendering: legible
+/// inside row layouts, distinct color per provider via ``providerColor``.
+struct ProviderMark: View {
+    let provider: String
+    var size: CGFloat = 18
+
+    var body: some View {
+        let accent = providerColor(provider)
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(Color(white: 0.10))
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(accent.opacity(0.15))
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .strokeBorder(accent.opacity(0.55), lineWidth: max(0.6, size * 0.06))
+            Text(providerMonogram(provider))
+                .font(.system(size: size * 0.62, weight: .black, design: .rounded))
+                .foregroundStyle(accent)
+                .shadow(color: accent.opacity(0.55), radius: max(1, size * 0.10))
+                // Optical centering nudge — the rounded font sits a hair
+                // high otherwise, especially for "A".
+                .offset(y: -size * 0.02)
+        }
+        .frame(width: size, height: size)
+        .help(provider.capitalized)
     }
 }
 
@@ -168,50 +214,30 @@ struct MenuBarView: View {
 // MARK: - Header (shared across tiers)
 
 private struct HeaderView: View {
-    let subtitle: String
     let trailing: AnyView?
     @State private var appeared = false
 
-    init(subtitle: String, trailing: AnyView? = nil) {
-        self.subtitle = subtitle
+    init(trailing: AnyView? = nil) {
         self.trailing = trailing
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Palette.cardFill)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(Palette.stroke, lineWidth: 0.5)
-                        )
-                        .frame(width: 44, height: 44)
-                    Text("$")
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Palette.neon)
-                        .shadow(color: Palette.neon.opacity(0.55), radius: 8)
-                }
+                Image("AppMark")
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 44, height: 44)
+                    .shadow(color: Palette.neon.opacity(0.35), radius: 6)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Text("Spend")
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("Tracker")
-                            .font(.system(size: 16, weight: .light, design: .rounded))
-                            .foregroundStyle(Palette.neon)
-                    }
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(Palette.neon)
-                            .frame(width: 5, height: 5)
-                            .shadow(color: Palette.neon.opacity(0.8), radius: 3)
-                        Text(subtitle)
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-                    }
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("Spend")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("Tracker")
+                        .font(.system(size: 16, weight: .light, design: .rounded))
+                        .foregroundStyle(Palette.neon)
                 }
 
                 Spacer()
@@ -237,14 +263,21 @@ private struct OverviewView: View {
     @EnvironmentObject private var store: SpendingStore
     @State private var heroExpanded: Bool = false
 
+    /// v2 layout is the default whenever a registry is installed — even
+    /// before the first successful poll. The user explicitly wants the
+    /// "overall across all accounts" to be the landing view, with
+    /// per-account drill-down on demand.
+    private var inV2Mode: Bool {
+        store.state.hasV2Accounts || store.registryInstalled
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HeaderView(
-                subtitle: store.state.hasV2Accounts ? "Yesterday · vendor truth" : "Today (proxy only)",
                 trailing: AnyView(ReconcileFreshness(date: store.state.lastReconciled))
             )
 
-            if store.state.hasV2Accounts {
+            if inV2Mode {
                 v2Body
             } else {
                 v1Body
@@ -286,13 +319,15 @@ private struct OverviewView: View {
             BurnRateCard(centsPerMin: est.burnRateCentsPerMin)
         }
 
+        BreakdownHeader(text: "BY ACCOUNT")
         if !store.state.accounts.isEmpty {
-            BreakdownHeader(text: "BY ACCOUNT")
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(store.state.accounts) { acct in
                     AccountRow(account: acct, total: store.state.totalsYesterdayUSD)
                 }
             }
+        } else {
+            NoAccountsYetCard()
         }
 
         HistoryLinkButton()
@@ -399,7 +434,7 @@ private struct AccountDetailView: View {
             Spacer()
             if let acct = store.account(id: accountID) {
                 HStack(spacing: 6) {
-                    Circle().fill(providerColor(acct.provider)).frame(width: 6, height: 6)
+                    ProviderMark(provider: acct.provider, size: 18)
                     Text(acct.label)
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
@@ -695,7 +730,7 @@ private struct AccountRow: View {
 
                 HStack(alignment: .center, spacing: 8) {
                     HStack(spacing: 6) {
-                        Circle().fill(color).frame(width: 5, height: 5)
+                        ProviderMark(provider: account.provider, size: 18)
                         Text(account.label)
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(.white.opacity(0.85))
@@ -1163,33 +1198,183 @@ private struct ErrorPill: View {
 
 private struct ErrorCard: View {
     let error: AccountError
+    @State private var showDetails = false
+
+    /// Pull the meaningful sentence out of a vendor error blob. Vendors
+    /// return JSON like `{"error":{"message":"invalid x-api-key", ...}}`
+    /// nested under varied keys. We prefer that string when we can parse
+    /// it; otherwise we fall back to the raw message.
+    private var summary: String {
+        ErrorCard.summarize(kind: error.kind, raw: error.message)
+    }
+
+    private var heading: String {
+        switch error.kind.lowercased() {
+        case "auth":     return "Admin key rejected"
+        case "network":  return "Network issue"
+        case "http":     return "Vendor error"
+        case "parse":    return "Unrecognized response"
+        case "internal": return "Reconciler error"
+        default:         return error.kind.capitalized
+        }
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Palette.danger)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(error.kind.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .tracking(1.0)
-                    .foregroundStyle(Palette.danger)
-                Text(error.message)
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.78))
-                    .lineLimit(3)
-                    .truncationMode(.tail)
+        HStack(alignment: .top, spacing: 0) {
+            Rectangle()
+                .fill(Palette.danger.opacity(0.85))
+                .frame(width: 2.5)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(error.kind.uppercased())
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .tracking(0.9)
+                        .foregroundStyle(Palette.danger.opacity(0.95))
+                    Text("·")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.30))
+                    Text(heading)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.88))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                Text(summary)
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .lineLimit(showDetails ? nil : 2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button(action: { showDetails.toggle() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: showDetails ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text(showDetails ? "Hide raw response" : "Show raw response")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundStyle(.white.opacity(0.40))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 1)
+
+                if showDetails {
+                    // Pretty-printed when possible (JSON wraps cleanly at
+                    // braces/commas), raw otherwise. Confined to the
+                    // available width with explicit wrapping rules so it
+                    // doesn't overflow the card.
+                    Text(ErrorCard.prettifyForDisplay(error.message))
+                        .font(.system(size: 9, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .textSelection(.enabled)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Color.white.opacity(0.04))
+                        )
+                        .padding(.top, 2)
+                }
             }
-            Spacer()
+            .padding(.leading, 10)
+            .padding(.trailing, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Palette.danger.opacity(0.06))
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Palette.danger.opacity(0.35), lineWidth: 0.5))
+                .fill(Color(white: 0.11))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                )
         )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Parser. Best-effort: tries JSON first, then a couple of regex
+    /// shapes vendors actually return. Falls back to a kind-specific
+    /// generic line so the user always sees a coherent sentence.
+    static func summarize(kind: String, raw: String) -> String {
+        // Most vendor blobs come prefixed like "HTTP 401: {…json…}".
+        // Lift the JSON portion if present.
+        let body: String
+        if let braceIdx = raw.firstIndex(of: "{") {
+            body = String(raw[braceIdx...])
+        } else {
+            body = raw
+        }
+
+        if let data = body.data(using: .utf8),
+           let any = try? JSONSerialization.jsonObject(with: data) {
+            if let msg = ErrorCard.findMessage(in: any), !msg.isEmpty {
+                return msg
+            }
+        }
+
+        // Fallback: drop the trailing JSON dump if parsing failed but the
+        // prefix is still informative (e.g., "HTTP 401: …" → "HTTP 401").
+        if let colon = raw.range(of: ": {") {
+            return String(raw[..<colon.lowerBound])
+        }
+
+        switch kind.lowercased() {
+        case "auth":    return "Admin key was rejected by the vendor."
+        case "network": return "Couldn't reach the vendor endpoint."
+        case "parse":   return "Vendor returned an unrecognized response."
+        default:        return raw.isEmpty ? "No additional detail." : raw
+        }
+    }
+
+    /// Reformat the raw error blob so it wraps cleanly inside the card.
+    /// If a JSON object is detected we pretty-print it with newlines at
+    /// each comma; that lets SwiftUI line-break at natural boundaries
+    /// instead of mid-token, which was causing the overflow.
+    static func prettifyForDisplay(_ raw: String) -> String {
+        // Capture the leading prefix (e.g., "HTTP 401: ") if any.
+        var prefix = ""
+        var jsonPart = raw
+        if let braceIdx = raw.firstIndex(of: "{") {
+            prefix = String(raw[..<braceIdx])
+            jsonPart = String(raw[braceIdx...])
+        }
+        guard let data = jsonPart.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data),
+              let pretty = try? JSONSerialization.data(
+                withJSONObject: parsed,
+                options: [.prettyPrinted, .sortedKeys]),
+              let prettyStr = String(data: pretty, encoding: .utf8)
+        else {
+            return raw
+        }
+        // JSONSerialization indents with 2 spaces by default; that's
+        // fine inside the mono inset block.
+        let trimmedPrefix = prefix.trimmingCharacters(in: .whitespaces)
+        return trimmedPrefix.isEmpty ? prettyStr : "\(trimmedPrefix)\n\(prettyStr)"
+    }
+
+    /// Walk a parsed JSON value looking for a likely "message" or
+    /// "detail" string. Vendors nest these inconsistently.
+    static func findMessage(in any: Any) -> String? {
+        if let dict = any as? [String: Any] {
+            for key in ["message", "detail", "description"] {
+                if let s = dict[key] as? String, !s.isEmpty { return s }
+            }
+            for v in dict.values {
+                if let s = findMessage(in: v) { return s }
+            }
+        } else if let arr = any as? [Any] {
+            for v in arr {
+                if let s = findMessage(in: v) { return s }
+            }
+        }
+        return nil
     }
 }
 
@@ -1548,6 +1733,39 @@ private struct BurnRateCard: View {
     }
 }
 
+// MARK: - Empty state for the BY ACCOUNT slot
+
+private struct NoAccountsYetCard: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "hourglass")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.cyan.opacity(0.85))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Waiting for first reconcile…")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("Vendor data lands within 5 minutes of the first successful poll.")
+                    .font(.system(size: 10, weight: .regular, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(white: 0.10))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5))
+        )
+    }
+}
+
 // MARK: - History link
 
 private struct HistoryLinkButton: View {
@@ -1844,17 +2062,21 @@ private struct DayDetailCard: View {
     @EnvironmentObject private var store: SpendingStore
 
     var body: some View {
-        let perAccount = store.history.compactMap { (aid, days) -> (String, String, Double)? in
-            guard let usd = days[dateISO], usd > 0 else { return nil }
+        let perAccount = store.history.compactMap { (aid, days) -> (provider: String, label: String, usd: Double)? in
+            guard let entry = days[dateISO], entry.usd > 0 else { return nil }
             let label = store.account(id: aid)?.label ?? aid
             let provider = store.account(id: aid)?.provider ?? ""
-            return (provider, label, usd)
+            return (provider, label, entry.usd)
         }
-        .sorted { $0.2 > $1.2 }
-        let total = perAccount.reduce(0.0) { $0 + $1.2 }
-        let displayDate = Self.prettyDate(dateISO)
+        .sorted { $0.usd > $1.usd }
 
-        return VStack(alignment: .leading, spacing: 8) {
+        let total = perAccount.reduce(0.0) { $0 + $1.usd }
+        let displayDate = Self.prettyDate(dateISO)
+        let breakdown = store.dayBreakdown(dateISO)
+        let topWorkspaces = Array(breakdown.workspaces.prefix(5))
+        let topKeys = Array(breakdown.keys.prefix(5))
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "calendar.badge.clock")
                     .font(.system(size: 11, weight: .semibold))
@@ -1882,34 +2104,60 @@ private struct DayDetailCard: View {
                     .foregroundStyle(.tertiary)
                     .padding(.vertical, 4)
             } else {
-                VStack(spacing: 1) {
-                    ForEach(Array(perAccount.enumerated()), id: \.offset) { _, row in
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(providerColor(row.0))
-                                .frame(width: 5, height: 5)
-                            Text(row.1)
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer()
-                            // Per-account share of the day
-                            Text("\(Int((row.2 / max(total, 0.0001) * 100).rounded()))%")
-                                .font(.system(size: 9, weight: .regular, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.30))
-                            Text(row.2, format: .currency(code: "USD"))
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .monospacedDigit()
-                                .frame(width: 62, alignment: .trailing)
+                Section(title: "BY ACCOUNT") {
+                    VStack(spacing: 1) {
+                        ForEach(Array(perAccount.enumerated()), id: \.offset) { _, row in
+                            DayDetailRow(
+                                provider: row.provider,
+                                label:    row.label,
+                                tail:     "",
+                                usd:      row.usd,
+                                total:    total,
+                                mono:     false
+                            )
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(Palette.rowFill)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+
+                if !topWorkspaces.isEmpty {
+                    Section(title: "WORKSPACES") {
+                        VStack(spacing: 1) {
+                            ForEach(topWorkspaces) { row in
+                                DayDetailRow(
+                                    provider: row.provider,
+                                    label:    row.label,
+                                    tail:     "",
+                                    usd:      row.usd,
+                                    total:    total,
+                                    mono:     false
+                                )
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                if !topKeys.isEmpty {
+                    Section(title: "KEYS") {
+                        VStack(spacing: 1) {
+                            ForEach(topKeys) { row in
+                                let display = row.tail.isEmpty
+                                    ? (row.label.isEmpty ? row.id : row.label)
+                                    : "…\(row.tail)\(row.label.isEmpty ? "" : " · \(row.label)")"
+                                DayDetailRow(
+                                    provider: row.provider,
+                                    label:    display,
+                                    tail:     row.tail,
+                                    usd:      row.usd,
+                                    total:    total,
+                                    mono:     true
+                                )
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -1932,6 +2180,54 @@ private struct DayDetailCard: View {
         let outFmt = DateFormatter()
         outFmt.dateFormat = "EEE · MMM d, yyyy"
         return outFmt.string(from: d)
+    }
+
+    private struct Section<Content: View>: View {
+        let title: String
+        @ViewBuilder var content: () -> Content
+        var body: some View {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                    .tracking(1.4)
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.horizontal, 2)
+                content()
+            }
+        }
+    }
+}
+
+private struct DayDetailRow: View {
+    let provider: String
+    let label: String
+    let tail: String
+    let usd: Double
+    let total: Double
+    let mono: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProviderMark(provider: provider, size: 18)
+            Text(label)
+                .font(.system(size: 11, weight: .medium,
+                              design: mono ? .monospaced : .rounded))
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+            Text("\(Int((usd / max(total, 0.0001) * 100).rounded()))%")
+                .font(.system(size: 9, weight: .regular, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.30))
+            Text(usd, format: .currency(code: "USD"))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
+                .monospacedDigit()
+                .frame(width: 62, alignment: .trailing)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Palette.rowFill)
     }
 }
 

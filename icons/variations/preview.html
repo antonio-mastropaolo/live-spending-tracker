@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Spend Tracker — App Icon Variations</title>
+<style>
+  body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, system-ui, sans-serif; padding: 32px; margin: 0; }
+  h1 { font-weight: 700; margin: 0 0 4px 0; }
+  h1 span { color: #22c55e; }
+  p.sub { color: #888; margin: 0 0 32px 0; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
+  .card { background: #111; border: 1px solid #222; border-radius: 14px; padding: 20px; transition: transform .15s, border-color .15s; }
+  .card:hover { transform: translateY(-2px); border-color: #333; }
+  .row { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 14px; }
+  .big { width: 140px; height: 140px; }
+  .sm { width: 64px; height: 64px; }
+  .xs { width: 32px; height: 32px; }
+  .meta { font-size: 13px; }
+  .meta .name { color: #fff; font-weight: 600; letter-spacing: 0.4px; }
+  .meta .desc { color: #888; margin-top: 4px; line-height: 1.4; }
+  .meta .file { color: #555; margin-top: 6px; font-family: ui-monospace, monospace; font-size: 11px; }
+  .legend { color: #666; font-size: 11px; margin-top: 6px; }
+</style>
+</head>
+<body>
+  <h1>Spend <span>Tracker</span> · App icon variations</h1>
+  <p class="sub">Five takes on the shield + dollar + circuit concept. Each shows three sizes — 140 / 64 / 32 — to preview menubar legibility.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="row">
+        <img class="big" src="v1-shield-faithful.svg">
+        <img class="sm" src="v1-shield-faithful.svg">
+        <img class="xs" src="v1-shield-faithful.svg">
+      </div>
+      <div class="meta">
+        <div class="name">V1 — Shield, faithful</div>
+        <div class="desc">Closest to your reference: filled shield, gold $ with gradient, orange trend arrow, green + cyan circuit traces, accent particles.</div>
+        <div class="file">v1-shield-faithful.svg</div>
+        <div class="legend">Highest detail · best at 64px+</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <img class="big" src="v2-shield-minimal.svg">
+        <img class="sm" src="v2-shield-minimal.svg">
+        <img class="xs" src="v2-shield-minimal.svg">
+      </div>
+      <div class="meta">
+        <div class="name">V2 — Shield, minimal</div>
+        <div class="desc">Stroke-only shield in green, gold $ inside. Strips away circuits and arrow for max clarity at small sizes.</div>
+        <div class="file">v2-shield-minimal.svg</div>
+        <div class="legend">Reads cleanly down to 16px</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <img class="big" src="v3-hex-frame.svg">
+        <img class="sm" src="v3-hex-frame.svg">
+        <img class="xs" src="v3-hex-frame.svg">
+      </div>
+      <div class="meta">
+        <div class="name">V3 — Hex frame</div>
+        <div class="desc">Hexagonal chassis with green→cyan gradient stroke, ghost arrow, gold $. More "circuit/network" than "armor."</div>
+        <div class="file">v3-hex-frame.svg</div>
+        <div class="legend">Distinctive silhouette</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <img class="big" src="v4-rounded-square.svg">
+        <img class="sm" src="v4-rounded-square.svg">
+        <img class="xs" src="v4-rounded-square.svg">
+      </div>
+      <div class="meta">
+        <div class="name">V4 — Rounded square + shield</div>
+        <div class="desc">Keeps the rounded-square chassis from the rest of the icon set, with a shield + $ inside. Best fit if you want tray consistency.</div>
+        <div class="file">v4-rounded-square.svg</div>
+        <div class="legend">Matches existing icon family</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <img class="big" src="v5-layered-pulse.svg">
+        <img class="sm" src="v5-layered-pulse.svg">
+        <img class="xs" src="v5-layered-pulse.svg">
+      </div>
+      <div class="meta">
+        <div class="name">V5 — Layered + pulse</div>
+        <div class="desc">Two stacked shields with a heartbeat trace flanking the $ — visually echoes the live "burn rate" idea.</div>
+        <div class="file">v5-layered-pulse.svg</div>
+        <div class="legend">Most "alive" looking</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

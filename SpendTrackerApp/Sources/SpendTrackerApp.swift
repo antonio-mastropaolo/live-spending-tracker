@@ -20,7 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastTotal: Double = -1
     private var cancellables = Set<AnyCancellable>()
 
-    private static let neon = NSColor(calibratedRed: 0.18, green: 1.0, blue: 0.34, alpha: 1.0)
+    private static let neon  = NSColor(calibratedRed: 0.18, green: 1.0,  blue: 0.34, alpha: 1.0)
+    /// Used for the menu-bar icon when state is older than 30 min. Amber
+    /// keeps the icon clearly visible (vs. secondaryLabelColor which
+    /// disappears on dark menu bars) while still reading as "not live."
+    /// Matches the STALE badge color in the popover.
+    private static let amber = NSColor(calibratedRed: 1.0,  green: 0.62, blue: 0.0,  alpha: 1.0)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -68,17 +73,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func renderIcon(total: Double, stale: Bool) -> NSImage {
+        // Menu-bar icon is drawn programmatically at native resolution
+        // rather than rasterized from the dock-icon SVG — the detailed
+        // shield-and-pulse mark loses all legibility at 20pt. The
+        // dock/Finder icon is still the rich AppMark; this is a
+        // separate, deliberately simple high-contrast mark optimized
+        // for the menu bar.
         let neon = AppDelegate.neon
-        let dim  = NSColor.secondaryLabelColor
-        let main: NSColor = stale ? dim : neon
+        let amber = AppDelegate.amber
+        let main: NSColor = stale ? amber : neon
 
-        let glow: CGFloat = stale ? 0 : (0.65 + 0.35 * flashIntensity)
+        // Even in the stale state we keep a soft halo so the icon stands
+        // out on dark menu bars. The amber+halo combo reads as "warning,
+        // not live" without disappearing into the background.
+        let glow: CGFloat = stale ? 0.5 : (0.65 + 0.35 * flashIntensity)
 
         let totalStr = String(format: "$%.2f", total)
         let costFont = NSFont.monospacedSystemFont(ofSize: 14, weight: .bold)
 
         let costShadow = NSShadow()
-        costShadow.shadowColor = stale ? .clear : neon.withAlphaComponent(min(1.0, glow * 0.9))
+        costShadow.shadowColor = main.withAlphaComponent(min(1.0, glow * 0.9))
         costShadow.shadowBlurRadius = 3 + 4 * glow
         costShadow.shadowOffset = .zero
         let costAttrs: [NSAttributedString.Key: Any] = [
@@ -101,18 +115,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let circleRect = NSRect(x: leftPad, y: (totalH - circleD) / 2, width: circleD, height: circleD)
 
+        // Filled neon disc with a soft halo. High contrast against any
+        // menu-bar background (light or dark wallpaper, accessibility
+        // tints, etc.) — that's what was missing with the rasterized
+        // dark-fill shield.
         let circleShadow = NSShadow()
-        circleShadow.shadowColor = stale ? .clear : neon.withAlphaComponent(min(1.0, glow))
+        circleShadow.shadowColor = main.withAlphaComponent(min(1.0, glow))
         circleShadow.shadowBlurRadius = 5 + 5 * glow
         circleShadow.shadowOffset = .zero
         circleShadow.set()
         main.setFill()
         NSBezierPath(ovalIn: circleRect).fill()
 
+        // Reset shadow state before drawing the inner glyph so the
+        // black "$" doesn't itself emit a halo.
         let clearShadow = NSShadow()
         clearShadow.shadowColor = .clear
         clearShadow.set()
 
+        // Bold black "$" stamped into the disc. Black on neon green is
+        // the highest-contrast pairing on a 20pt target.
         let dollar = "$" as NSString
         let dollarFont = NSFont.systemFont(ofSize: 13, weight: .black)
         let dollarAttrs: [NSAttributedString.Key: Any] = [

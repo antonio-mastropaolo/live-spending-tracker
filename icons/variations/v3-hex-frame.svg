@@ -1,0 +1,43 @@
+<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="v3bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f1419"/>
+      <stop offset="100%" stop-color="#000"/>
+    </linearGradient>
+    <linearGradient id="v3hex" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <filter id="v3glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="128" height="128" rx="22" fill="url(#v3bg)"/>
+  <!-- Hex frame -->
+  <polygon points="64,14 110,40 110,88 64,114 18,88 18,40"
+           fill="none" stroke="url(#v3hex)" stroke-width="2.5" stroke-linejoin="round" filter="url(#v3glow)"/>
+  <polygon points="64,26 100,46 100,82 64,102 28,82 28,46"
+           fill="none" stroke="#06b6d4" stroke-width="0.8" stroke-opacity="0.3"/>
+  <!-- Circuit nodes at corners -->
+  <g fill="#22c55e" filter="url(#v3glow)">
+    <circle cx="64" cy="14" r="2.5"/>
+    <circle cx="18" cy="40" r="2"/>
+    <circle cx="18" cy="88" r="2"/>
+  </g>
+  <g fill="#06b6d4" filter="url(#v3glow)">
+    <circle cx="110" cy="40" r="2.5"/>
+    <circle cx="110" cy="88" r="2"/>
+    <circle cx="64" cy="114" r="2"/>
+  </g>
+  <!-- Trending arrow background -->
+  <g stroke="#06b6d4" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.5">
+    <polyline points="42,76 56,62 68,70 86,52"/>
+  </g>
+  <!-- Dollar sign -->
+  <g filter="url(#v3glow)" stroke="#fbbf24" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M76 50 C76 44, 70 40, 64 40 C58 40, 52 44, 52 50 C52 56, 58 58, 64 60 C70 62, 76 64, 76 70 C76 76, 70 80, 64 80 C58 80, 52 76, 52 70"/>
+    <line x1="64" y1="34" x2="64" y2="40"/>
+    <line x1="64" y1="80" x2="64" y2="86"/>
+  </g>
+</svg>

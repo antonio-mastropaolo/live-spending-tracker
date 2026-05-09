@@ -1,15 +1,28 @@
 """90-day daily-rollup history at ~/.ai-spending/history.json.
 
-Schema (mode 0600):
+Schema (mode 0600), v2 (rich):
 
     {
-      "<account_id>": {"YYYY-MM-DD": <usd_float>, ...},
+      "<account_id>": {
+        "YYYY-MM-DD": {
+          "usd":          <float>,
+          "by_workspace": {"<ws_id>":  {"label": "...", "usd": <float>}, ...},
+          "by_key":       {"<key_id>": {"label": "...", "tail": "...", "usd": <float>}, ...}
+        },
+        ...
+      },
       ...
     }
 
-Why JSON, not sqlite: ≤ ~1 KB per account at 90 days, no new dependency,
-atomic writes via the same temp-file dance the rest of the project uses,
-and the Swift side can read it with one ``JSONSerialization`` call.
+For backwards compatibility, day entries written by the previous shape
+(`<usd_float>`) are still accepted on read and normalized to the rich
+form with empty ``by_workspace`` / ``by_key`` slots. New writes always
+use the rich form.
+
+Why JSON, not sqlite: even with breakdowns this is ≤ ~10 KB per account
+at 90 days, no new dependency, atomic writes via the same temp-file
+dance the rest of the project uses, and the Swift side can read it
+with one ``JSONSerialization`` call.
 
 Ownership:
     - The v2 reconciler writes here (one merge per tick, after the snapshot
@@ -46,10 +59,10 @@ LOCK_FILE = STATE_DIR / ".history.lock"
 MAX_DAYS = 120
 
 
-def load_history() -> dict[str, dict[str, float]]:
-    """Return {account_id: {date_iso: usd}}. Empty dict if file is absent
-    or malformed — never raises. Reader-friendly because the Swift side
-    polls this without a lock."""
+def load_history() -> dict[str, dict[str, dict]]:
+    """Return {account_id: {date_iso: {usd, by_workspace, by_key}}}. Empty
+    dict if file is absent or malformed — never raises. Old float-only
+    entries are upgraded to the rich shape with empty breakdowns."""
     if not HISTORY_FILE.exists():
         return {}
     try:
@@ -59,28 +72,37 @@ def load_history() -> dict[str, dict[str, float]]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    out: dict[str, dict[str, float]] = {}
+    out: dict[str, dict[str, dict]] = {}
     for aid, days in raw.items():
         if not isinstance(aid, str) or not isinstance(days, dict):
             continue
-        clean: dict[str, float] = {}
+        clean: dict[str, dict] = {}
         for d, v in days.items():
             if not isinstance(d, str):
                 continue
-            try:
-                clean[d] = float(v)
-            except (TypeError, ValueError):
-                continue
+            entry = _normalize_day_entry(v)
+            if entry is not None:
+                clean[d] = entry
         out[aid] = clean
     return out
 
 
-def update_history(snapshots: dict[str, dict[str, float]]) -> None:
-    """Merge per-account daily totals into history.json.
+def total_for(account_id: str, date_iso: str) -> float:
+    """Convenience accessor for callers that only care about the day's
+    total. Returns 0 when the account or date is missing."""
+    hist = load_history()
+    return float((hist.get(account_id, {}).get(date_iso, {}) or {}).get("usd", 0.0) or 0.0)
 
-    `snapshots` shape: {account_id: {date_iso: usd, ...}}. Existing dates
-    for the same (account_id) are OVERWRITTEN — vendor data is canonical
-    and may revise yesterday's number for ~24h after rollover.
+
+def update_history(snapshots: dict[str, dict[str, object]]) -> None:
+    """Merge per-account daily entries into history.json.
+
+    `snapshots` shape: {account_id: {date_iso: <entry>}}, where <entry> is
+    either a float (legacy / total-only callers) or the rich form
+    {usd, by_workspace, by_key}. Either way the on-disk record is the
+    rich shape. Existing dates for the same (account_id) are
+    OVERWRITTEN — vendor data is canonical and may revise yesterday's
+    number for ~24h after rollover.
     """
     if not snapshots:
         return
@@ -92,10 +114,9 @@ def update_history(snapshots: dict[str, dict[str, float]]) -> None:
             for aid, days in snapshots.items():
                 bucket = current.setdefault(aid, {})
                 for d, v in days.items():
-                    try:
-                        bucket[d] = round(float(v), 4)
-                    except (TypeError, ValueError):
-                        continue
+                    entry = _normalize_day_entry(v)
+                    if entry is not None:
+                        bucket[d] = entry
             current = _trim(current)
             _write_history(current)
         finally:
@@ -125,11 +146,60 @@ def prune_history(keep_account_ids: Iterable[str]) -> None:
 # helpers
 # ---------------------------------------------------------------------------
 
-def _trim(hist: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+def _normalize_day_entry(raw: object) -> dict | None:
+    """Coerce a single day's value to the rich form `{usd, by_workspace,
+    by_key}`. Accepts:
+      - bare float / int → upgraded with empty breakdowns (legacy shape)
+      - dict with at least a numeric `usd` field → cleaned
+    Anything else → None (caller skips).
+    """
+    if isinstance(raw, bool):       # bools are also ints in Python; reject
+        return None
+    if isinstance(raw, (int, float)):
+        return {"usd": round(float(raw), 4), "by_workspace": {}, "by_key": {}}
+    if not isinstance(raw, dict):
+        return None
+    try:
+        usd = round(float(raw.get("usd", 0.0)), 4)
+    except (TypeError, ValueError):
+        return None
+    bw_raw = raw.get("by_workspace")
+    bk_raw = raw.get("by_key")
+    by_workspace: dict[str, dict] = {}
+    if isinstance(bw_raw, dict):
+        for wid, w in bw_raw.items():
+            if not isinstance(wid, str) or not isinstance(w, dict):
+                continue
+            try:
+                wv = round(float(w.get("usd", 0.0)), 4)
+            except (TypeError, ValueError):
+                continue
+            by_workspace[wid] = {
+                "label": str(w.get("label") or wid),
+                "usd":   wv,
+            }
+    by_key: dict[str, dict] = {}
+    if isinstance(bk_raw, dict):
+        for kid, k in bk_raw.items():
+            if not isinstance(kid, str) or not isinstance(k, dict):
+                continue
+            try:
+                kv = round(float(k.get("usd", 0.0)), 4)
+            except (TypeError, ValueError):
+                continue
+            by_key[kid] = {
+                "label": str(k.get("label") or ""),
+                "tail":  str(k.get("tail") or ""),
+                "usd":   kv,
+            }
+    return {"usd": usd, "by_workspace": by_workspace, "by_key": by_key}
+
+
+def _trim(hist: dict[str, dict[str, dict]]) -> dict[str, dict[str, dict]]:
     """Keep only the most recent MAX_DAYS dates per account. Compares ISO
     strings lexicographically — works because ISO-8601 dates sort
     chronologically."""
-    out: dict[str, dict[str, float]] = {}
+    out: dict[str, dict[str, dict]] = {}
     for aid, days in hist.items():
         if len(days) <= MAX_DAYS:
             out[aid] = days
@@ -139,7 +209,7 @@ def _trim(hist: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
     return out
 
 
-def _write_history(payload: dict[str, dict[str, float]]) -> None:
+def _write_history(payload: dict[str, dict[str, dict]]) -> None:
     tmp = tempfile.NamedTemporaryFile(
         mode="w", dir=STATE_DIR, delete=False, suffix=".tmp"
     )

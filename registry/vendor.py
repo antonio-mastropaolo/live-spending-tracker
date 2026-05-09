@@ -48,9 +48,14 @@ class AccountSnapshot:
     """Normalized one-account-one-day result. Caller-friendly: every field
     has a sensible empty default so callers can populate progressively.
 
-    `daily_history` is the full 90-day daily series ({date_iso: usd}) used
-    by ``state/history.py``. ``trend_7d_usd`` is the trailing 7-day slice
-    of that, served by the snapshot directly so the UI doesn't need
+    `daily_history` is the full 90-day daily series. Each value is a rich
+    entry: ``{usd, by_workspace, by_key}`` where ``by_workspace`` /
+    ``by_key`` are the same shape used by ``state/history.py``. This is
+    what gets persisted to ~/.ai-spending/history.json so the UI can
+    inspect any past day's workspace + key breakdown.
+
+    ``trend_7d_usd`` is the trailing 7-day slice of `daily_history` (just
+    the totals), served by the snapshot directly so the UI doesn't need
     history.json to render the 7-day sparkline.
     """
     label: str
@@ -60,7 +65,7 @@ class AccountSnapshot:
     by_workspace: dict[str, dict[str, Any]] = None  # type: ignore[assignment]
     by_key: dict[str, dict[str, Any]] = None        # type: ignore[assignment]
     trend_7d_usd: list[float] = None                # type: ignore[assignment]
-    daily_history: dict[str, float] = None          # type: ignore[assignment]
+    daily_history: dict[str, dict[str, Any]] = None # type: ignore[assignment]
 
     def to_dict(self) -> dict:
         return {
@@ -238,15 +243,12 @@ async def _fetch_anthropic(entry: RegistryEntry) -> AccountSnapshot:
     by_workspace = {k: {**v, "usd": round(v["usd"], 4)} for k, v in by_workspace.items()}
     by_key = {k: {**v, "usd": round(v["usd"], 4)} for k, v in by_key.items()}
 
-    # 90-day daily totals — date_iso → usd. Build with O(1) lookups so the
-    # bucket walk stays linear in the response size.
-    daily_history: dict[str, float] = {d: 0.0 for d in days}
-    for r in rows:
-        if r["date"] in daily_history:
-            daily_history[r["date"]] += r["usd"]
-    daily_history = {k: round(v, 4) for k, v in daily_history.items()}
+    # 90-day rich daily history — each day carries its own workspace + key
+    # breakdown so the History tier's day-detail card can drill into any
+    # date, not just yesterday.
+    daily_history = _build_daily_history_anthropic(rows, days, labels)
 
-    trend = [daily_history.get(d, 0.0) for d in days[-7:]]
+    trend = [daily_history.get(d, {}).get("usd", 0.0) for d in days[-7:]]
 
     return AccountSnapshot(
         label=entry.label,
@@ -258,6 +260,47 @@ async def _fetch_anthropic(entry: RegistryEntry) -> AccountSnapshot:
         trend_7d_usd=trend,
         daily_history=daily_history,
     )
+
+
+def _build_daily_history_anthropic(
+    rows: list[dict],
+    days: list[str],
+    labels: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    """Bin Anthropic flat rows by date into rich per-day breakdowns.
+
+    Output shape per day:
+        {usd: float, by_workspace: {ws_id: {label, usd}}, by_key: {ak_id: {label, tail, usd}}}
+    """
+    # Pre-seed all days so heatmap doesn't have gaps.
+    out: dict[str, dict[str, Any]] = {
+        d: {"usd": 0.0, "by_workspace": {}, "by_key": {}} for d in days
+    }
+    for r in rows:
+        d = r["date"]
+        if d not in out:
+            continue
+        bucket = out[d]
+        usd = r["usd"]
+        bucket["usd"] += usd
+        ws = r.get("workspace_id")
+        if ws:
+            entry = bucket["by_workspace"].setdefault(ws, {"label": labels.get(ws, ws), "usd": 0.0})
+            entry["usd"] += usd
+        ak = r.get("api_key_id")
+        if ak:
+            entry = bucket["by_key"].setdefault(ak, {"label": "", "tail": "", "usd": 0.0})
+            entry["usd"] += usd
+            if r.get("key_tail") and not entry["tail"]:
+                entry["tail"] = r["key_tail"]
+    # Round the values for stable JSON output.
+    for d, bucket in out.items():
+        bucket["usd"] = round(bucket["usd"], 4)
+        for w in bucket["by_workspace"].values():
+            w["usd"] = round(w["usd"], 4)
+        for k in bucket["by_key"].values():
+            k["usd"] = round(k["usd"], 4)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -396,13 +439,9 @@ async def _fetch_openai(entry: RegistryEntry) -> AccountSnapshot:
     by_workspace = {k: {**v, "usd": round(v["usd"], 4)} for k, v in by_workspace.items()}
     by_key = {k: {**v, "usd": round(v["usd"], 4)} for k, v in by_key.items()}
 
-    daily_history: dict[str, float] = {d: 0.0 for d in days}
-    for r in rows:
-        if r["date"] in daily_history:
-            daily_history[r["date"]] += r["usd"]
-    daily_history = {k: round(v, 4) for k, v in daily_history.items()}
+    daily_history = _build_daily_history_openai(rows, days, labels)
 
-    trend = [daily_history.get(d, 0.0) for d in days[-7:]]
+    trend = [daily_history.get(d, {}).get("usd", 0.0) for d in days[-7:]]
 
     return AccountSnapshot(
         label=entry.label,
@@ -414,6 +453,41 @@ async def _fetch_openai(entry: RegistryEntry) -> AccountSnapshot:
         trend_7d_usd=trend,
         daily_history=daily_history,
     )
+
+
+def _build_daily_history_openai(
+    rows: list[dict],
+    days: list[str],
+    labels: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    """OpenAI variant of the per-day breakdown builder. ``project_id`` is
+    mapped onto ``by_workspace`` so the UI renders both providers with
+    one code path."""
+    out: dict[str, dict[str, Any]] = {
+        d: {"usd": 0.0, "by_workspace": {}, "by_key": {}} for d in days
+    }
+    for r in rows:
+        d = r["date"]
+        if d not in out:
+            continue
+        bucket = out[d]
+        usd = r["usd"]
+        bucket["usd"] += usd
+        proj = r.get("project_id")
+        if proj:
+            entry = bucket["by_workspace"].setdefault(proj, {"label": labels.get(proj, proj), "usd": 0.0})
+            entry["usd"] += usd
+        ak = r.get("api_key_id")
+        if ak:
+            entry = bucket["by_key"].setdefault(ak, {"label": "", "tail": ak[-4:], "usd": 0.0})
+            entry["usd"] += usd
+    for d, bucket in out.items():
+        bucket["usd"] = round(bucket["usd"], 4)
+        for w in bucket["by_workspace"].values():
+            w["usd"] = round(w["usd"], 4)
+        for k in bucket["by_key"].values():
+            k["usd"] = round(k["usd"], 4)
+    return out
 
 
 # ---------------------------------------------------------------------------
