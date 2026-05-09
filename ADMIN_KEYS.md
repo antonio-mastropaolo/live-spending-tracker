@@ -14,20 +14,37 @@ charge you today, compares it against what the proxy recorded, and trips a
 
 ## Coverage matrix
 
-What the reconciler can and can't do, per vendor:
+What the reconciler can and can't do, per vendor (verified against the live
+endpoints, not just docs):
 
 | Provider     | Real-time? | Polled? | Vendor lag    | Auth needed                      |
 |--------------|------------|---------|---------------|----------------------------------|
-| Anthropic    | proxy      | yes     | ~1 hr         | admin key (`sk-ant-admin-…`)     |
-| OpenAI       | proxy      | yes     | ~1 hr         | admin key (org-level)            |
+| Anthropic    | proxy      | yes     | **~1 day**    | admin key (`sk-ant-admin-…`)     |
+| OpenAI       | proxy      | yes     | **~1 day**    | admin key (org-level)            |
 | Google       | proxy      | **no**  | ~24 hr        | (BigQuery export — out of scope) |
 | HuggingFace  | proxy      | **no**  | —             | no public per-key API            |
 | Mistral      | proxy      | **no**  | —             | no public per-key API            |
 | Cohere       | proxy      | **no**  | —             | no public per-key API            |
 
-Honest summary: **the reconciler closes the silent-undercount hole for
-Anthropic and OpenAI only.** For everything else the proxy is the only
-signal — DRIFT cannot fire and you must accept best-effort numbers there.
+**Important correction from the first cut of this doc:** the lag is *one
+full day*, not ~1 hour. Anthropic's `cost_report` endpoint refuses date
+ranges that extend into "today" (the bucket containing the current moment)
+with a misleading "ending date must be after starting date" error. So we
+poll *yesterday's* completed bucket. OpenAI's `organization/costs`
+endpoint behaves similarly.
+
+What this means for DRIFT detection:
+
+- **Today's spend:** only the proxy sees it. If the proxy misses traffic
+  *today*, you won't know until the next day's reconcile pass.
+- **Yesterday's spend:** the reconciler compares yesterday's vendor total
+  vs. yesterday's proxy snapshot (saved at midnight rollover). DRIFT fires
+  if they disagree.
+- **Net:** silent undercounts are caught within ~24 hours, not within
+  minutes. Better than nothing, worse than I claimed initially.
+
+The proxy is still your real-time signal. The reconciler is a *next-day*
+audit that catches failures of the proxy.
 
 ## Setup
 
@@ -82,15 +99,24 @@ Per provider, with hysteresis so the UI doesn't flap:
 ```
 
 - **Tick:** every 5 minutes (one reconcile pass).
+- **What's compared:** yesterday's vendor total vs. yesterday's proxy
+  snapshot (`state.yesterday_by_provider`). NOT today vs. today — the
+  vendor's today bucket isn't fetchable.
 - **Threshold:** `|proxy − vendor| / max(vendor, $0.05) > 10%`.
 - **Floor:** when both numbers are under `$0.05`, ratio is treated as 0
   (vendor rounding noise).
 - **Trip:** 3 consecutive over-threshold ticks → DRIFT.
 - **Recover:** 3 consecutive within-threshold ticks → OK.
 
-So the UI takes ~15 minutes to enter or leave DRIFT. That tradeoff prevents
-the indicator from flapping when vendor accounting briefly lags but still
-catches a real undercount within reasonable time.
+Note: within a single day, yesterday's snapshot doesn't change, so 3
+ticks really means 3 confirmations of the same number. Hysteresis is
+mostly defensive against transient API errors / partial vendor
+accounting on the boundary just after midnight UTC.
+
+When you first install the reconciler, there is no yesterday snapshot
+(proxy hasn't run for a full day yet). The reconciler still records
+`vendor_truth` but skips DRIFT computation until the first daily
+rollover. You'll see drift come online ~24 hours after install.
 
 ## What the menu bar shows
 

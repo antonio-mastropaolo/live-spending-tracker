@@ -74,11 +74,22 @@ def load_admin_keys() -> dict[str, str]:
         return {}
 
 
-def _today_utc_start_iso() -> str:
+def _yesterday_utc_window() -> tuple[str, str]:
+    """Return (starting_at, ending_at) covering YESTERDAY (UTC) as RFC 3339.
+
+    Anthropic's cost_report rejects ranges that extend past the most recent
+    completed day with a misleading "ending date must be after starting
+    date" error. So we poll yesterday's bucket — vendor lag is ~1 day, not
+    ~1 hour as the docs imply. The DRIFT signal therefore tells us
+    'yesterday's vendor total disagrees with what the proxy captured
+    yesterday' rather than 'right now is wrong.'
+    """
+    from datetime import timedelta
     now = datetime.now(timezone.utc)
-    return now.replace(hour=0, minute=0, second=0, microsecond=0).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yest_start = today_start - timedelta(days=1)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    return yest_start.strftime(fmt), today_start.strftime(fmt)
 
 
 async def _fetch_anthropic_today_usd(admin_key: str) -> Optional[float]:
@@ -91,7 +102,8 @@ async def _fetch_anthropic_today_usd(admin_key: str) -> Optional[float]:
                    "results": [{"amount": "0.123", "currency": "USD", ...}]}]}
     """
     url = "https://api.anthropic.com/v1/organizations/cost_report"
-    params = {"starting_at": _today_utc_start_iso()}
+    starting_at, ending_at = _yesterday_utc_window()
+    params = {"starting_at": starting_at, "ending_at": ending_at}
     headers = {
         "x-api-key": admin_key,
         "anthropic-version": "2023-06-01",
@@ -99,10 +111,15 @@ async def _fetch_anthropic_today_usd(admin_key: str) -> Optional[float]:
     timeout = aiohttp.ClientTimeout(total=15)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url, headers=headers, params=params) as resp:
+            body = await resp.text()
             if resp.status != 200:
-                logger.warning("anthropic cost_report HTTP %s", resp.status)
+                logger.warning("anthropic cost_report HTTP %s — body=%s", resp.status, body[:400])
                 return None
-            payload = await resp.json()
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError as exc:
+                logger.warning("anthropic cost_report bad JSON: %s", exc)
+                return None
     total = 0.0
     for bucket in payload.get("data", []):
         for r in bucket.get("results", []):
@@ -130,10 +147,15 @@ async def _fetch_openai_today_usd(admin_key: str) -> Optional[float]:
     timeout = aiohttp.ClientTimeout(total=15)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url, headers=headers, params=params) as resp:
+            body = await resp.text()
             if resp.status != 200:
-                logger.warning("openai org/costs HTTP %s", resp.status)
+                logger.warning("openai org/costs HTTP %s — body=%s", resp.status, body[:400])
                 return None
-            payload = await resp.json()
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError as exc:
+                logger.warning("openai org/costs bad JSON: %s", exc)
+                return None
     total = 0.0
     for bucket in payload.get("data", []):
         for r in bucket.get("results", []):
@@ -242,15 +264,23 @@ async def reconcile_once() -> dict[str, Optional[float]]:
         try:
             state = load_state()
             vendor_truth = state.setdefault("vendor_truth", {})
+            yest_snapshot = state.get("yesterday_by_provider", {}) or {}
             now = datetime.now(timezone.utc).isoformat()
             for provider, vendor_usd in fetched.items():
-                proxy_usd = state.get("by_provider", {}).get(provider, 0.0)
                 vendor_truth[provider] = {
                     "usd": round(vendor_usd, 4),
                     "fetched_at": now,
                     "source": "admin_api",
+                    "covers": "yesterday_utc",
                 }
-                _update_drift_for(state, provider, vendor_usd, proxy_usd)
+                # Drift compares yesterday-vendor vs yesterday-proxy. If we
+                # don't yet have a yesterday snapshot (e.g. proxy was just
+                # installed), skip drift this tick rather than computing
+                # against today's running total — that would be a
+                # misleading apples-to-oranges comparison.
+                if provider in yest_snapshot:
+                    proxy_yest = yest_snapshot.get(provider, 0.0)
+                    _update_drift_for(state, provider, vendor_usd, proxy_yest)
             state["last_reconciled"] = now
             _write_state(state)
         finally:

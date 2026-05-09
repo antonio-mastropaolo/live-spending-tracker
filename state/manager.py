@@ -40,13 +40,35 @@ def _empty_state() -> dict:
         "by_provider": {},
         "by_model": {},
         "by_key": {},
-        "vendor_truth": {},   # {provider: {usd, fetched_at, source}}
-        "drift": {},          # {provider: {state, delta_pct, ...}} — see reconciler.py
+        "vendor_truth": {},                # {provider: {usd, fetched_at, source}}
+        "drift": {},                       # {provider: {state, delta_pct, ...}} — see reconciler.py
+        # Snapshot of the previous day's totals, kept so the reconciler can
+        # compare apples-to-apples against vendor cost-report endpoints
+        # (which only expose completed-day buckets).
+        "yesterday_date": None,
+        "yesterday_by_provider": {},
+        "yesterday_total_usd": 0.0,
         "cache_creation_tokens": 0,
         "cache_read_tokens": 0,
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "last_reconciled": None,
     }
+
+
+def _rollover_if_stale(state: dict) -> dict:
+    """If state['date'] is older than today, return a fresh state whose
+    yesterday_* fields snapshot the previous day's totals. The previous
+    day is whatever date was on the stale state — there's no in-between
+    history. If state is already today, return it unchanged.
+    """
+    today = date.today().isoformat()
+    if state.get("date") == today:
+        return state
+    fresh = _empty_state()
+    fresh["yesterday_date"] = state.get("date")
+    fresh["yesterday_by_provider"] = dict(state.get("by_provider", {}) or {})
+    fresh["yesterday_total_usd"] = state.get("total_usd", 0.0) or 0.0
+    return fresh
 
 
 def load_state() -> dict:
@@ -55,9 +77,7 @@ def load_state() -> dict:
     try:
         with open(STATE_FILE) as f:
             state = json.load(f)
-        if state.get("date") != date.today().isoformat():
-            return _empty_state()
-        return state
+        return _rollover_if_stale(state)
     except (json.JSONDecodeError, OSError):
         return _empty_state()
 
