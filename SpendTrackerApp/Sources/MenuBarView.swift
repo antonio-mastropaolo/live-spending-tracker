@@ -1406,7 +1406,7 @@ private struct TodayEstimateGhost: View {
                     .foregroundStyle(.white.opacity(0.45))
             }
             Spacer()
-            Text(String(format: "$%.4f", estimate.usd))
+            Text(String(format: "$%.2f", estimate.usd))
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Palette.cyan)
                 .shadow(color: Palette.cyan.opacity(0.45), radius: 4)

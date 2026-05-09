@@ -115,12 +115,19 @@ struct SpendingState {
     var hasV2Accounts: Bool { !accounts.isEmpty }
 
     /// Headline number shown in the menu bar icon.
-    /// v2: totals.yesterday_usd + (today_estimate.usd ?? 0)
-    /// v1: legacy proxy total
+    ///
+    /// Prefer today's live proxy estimate when it's non-zero — that's the
+    /// most useful "what am I spending right now" signal. Fall back to
+    /// yesterday's vendor truth when the proxy is idle, and to the v1
+    /// proxy total when there's no v2 registry installed.
+    ///
+    /// (The previous version summed yesterday + today, which conflated
+    /// two different windows on a single number.)
     var headlineUSD: Double {
-        if hasV2Accounts {
-            return totalsYesterdayUSD + (todayEstimate?.usd ?? 0)
+        if let today = todayEstimate?.usd, today > 0.0001 {
+            return today
         }
+        if hasV2Accounts { return totalsYesterdayUSD }
         return totalUSD
     }
 }
