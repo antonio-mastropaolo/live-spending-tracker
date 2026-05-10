@@ -731,61 +731,70 @@ private struct AccountRow: View {
         let wow = store.weekOverWeek(for: account.id)
 
         return Button(action: { store.showAccount(account.id) }) {
-            HStack(alignment: .center, spacing: 0) {
-                color.frame(width: 2).clipShape(Rectangle())
-
-                HStack(alignment: .center, spacing: 8) {
-                    HStack(spacing: 6) {
-                        ProviderMark(provider: account.provider, size: 18)
-                        Text(account.label)
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        if isOverBudget {
-                            BudgetOverPill()
-                        }
-                        if account.error != nil {
-                            ErrorPill(kind: account.error!.kind)
-                        }
+            HStack(alignment: .center, spacing: 8) {
+                HStack(spacing: 6) {
+                    ProviderMark(provider: account.provider, size: 18)
+                    Text(account.label)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if isOverBudget {
+                        BudgetOverPill()
                     }
-                    .frame(width: 150, alignment: .leading)
+                    if account.error != nil {
+                        ErrorPill(kind: account.error!.kind)
+                    }
+                }
+                .frame(width: 150, alignment: .leading)
 
+                // Bar — fixed height capsule, no GeometryReader so the
+                // row can't grow vertically with the popover.
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.06)).frame(height: 4)
                     GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 4)
-                            Rectangle().fill(color.opacity(0.85))
-                                .frame(width: geo.size.width * fraction, height: 4)
-                        }
-                        .frame(maxHeight: .infinity, alignment: .center)
+                        Capsule().fill(color.opacity(0.85))
+                            .frame(width: max(0, geo.size.width * fraction), height: 4)
                     }
                     .frame(height: 4)
-
-                    Text(usd, format: .currency(code: "USD"))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.78))
-                        .monospacedDigit()
-                        .frame(width: 56, alignment: .trailing)
-
-                    WoWArrow(deltaFraction: wow)
-                        .frame(width: 38, alignment: .trailing)
-
-                    Text("\(pct)%")
-                        .font(.system(size: 10, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.28))
-                        .frame(width: 22, alignment: .trailing)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.35))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Palette.rowFill)
-                .overlay(Rectangle().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
+                .frame(height: 4)
+                .frame(maxWidth: .infinity)
+
+                Text(usd, format: .currency(code: "USD"))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .monospacedDigit()
+                    .frame(width: 56, alignment: .trailing)
+
+                WoWArrow(deltaFraction: wow)
+                    .frame(width: 38, alignment: .trailing)
+
+                Text("\(pct)%")
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.28))
+                    .frame(width: 22, alignment: .trailing)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.35))
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                // Leading 2pt accent rule sits inside the row background
+                // so it inherits the row's natural height — no greedy
+                // `Color.frame(width: 2)` siblings that grow vertically
+                // when the popover gets tall.
+                ZStack(alignment: .leading) {
+                    Palette.rowFill
+                    Rectangle().fill(color).frame(width: 2)
+                }
+            )
+            .overlay(Rectangle().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: false, vertical: true)
         .help("Drill into \(account.label)")
     }
 }
