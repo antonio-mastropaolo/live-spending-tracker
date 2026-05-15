@@ -95,10 +95,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         costShadow.shadowColor = main.withAlphaComponent(min(1.0, glow * 0.9))
         costShadow.shadowBlurRadius = 3 + 4 * glow
         costShadow.shadowOffset = .zero
+        // Shadow lives in the graphics context (see the disc draw below), not in
+        // the attributes dict. macOS 26.x crashed inside -[NSDictionary
+        // initWithDictionary:copyItems:] when NSShadow was an attribute value.
         let costAttrs: [NSAttributedString.Key: Any] = [
             .font: costFont,
             .foregroundColor: main,
-            .shadow: costShadow,
         ]
         let costSize = (totalStr as NSString).size(withAttributes: costAttrs)
 
@@ -152,7 +154,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             x: leftPad + circleD + gap,
             y: (totalH - costSize.height) / 2
         )
+        NSGraphicsContext.saveGraphicsState()
+        costShadow.set()
         (totalStr as NSString).draw(at: costPoint, withAttributes: costAttrs)
+        NSGraphicsContext.restoreGraphicsState()
 
         img.isTemplate = false
         return img
