@@ -27,7 +27,7 @@ REGISTRY_FILE = REGISTRY_DIR / "registry.json"
 
 SUPPORTED_PROVIDERS = frozenset({"anthropic", "openai"})
 DEFAULT_GROUPINGS = {
-    "anthropic": ("workspace_id", "api_key_id"),
+    "anthropic": ("workspace_id",),
     "openai":    ("project_id", "api_key_id"),
 }
 
