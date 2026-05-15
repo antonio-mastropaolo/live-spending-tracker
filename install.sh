@@ -4,8 +4,16 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")" && pwd)"
 STATE_DIR="$HOME/.ai-spending"
 
-echo "==> Installing Python proxy dependencies..."
-pip3 install -q -r "$REPO/requirements.txt"
+echo "==> Creating project venv..."
+VENV="$REPO/.venv"
+if [ ! -d "$VENV" ]; then
+  python3 -m venv "$VENV"
+fi
+VENV_PY="$VENV/bin/python3"
+
+echo "==> Installing Python proxy dependencies into venv..."
+"$VENV_PY" -m pip install -q --upgrade pip
+"$VENV_PY" -m pip install -q -r "$REPO/requirements.txt"
 
 echo "==> Building native menu-bar app..."
 cd "$REPO"
@@ -50,7 +58,7 @@ cat > "$PLIST" <<PLIST_EOF
   <key>Label</key>         <string>com.amastro.ai-spend-proxy</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/python3</string>
+    <string>$VENV_PY</string>
     <string>$REPO/proxy/server.py</string>
   </array>
   <key>RunAtLoad</key>     <true/>
